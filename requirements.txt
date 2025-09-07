@@ -1,0 +1,6 @@
+ucapi>=0.3.1
+aiohttp>=3.8.0
+websockets>=10.0
+asyncio-mqtt>=0.13.0
+Pillow>=9.0.0
+certifi

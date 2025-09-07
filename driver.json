@@ -1,0 +1,36 @@
+{
+  "driver_id": "uc_naim_driver",
+  "version": "1.0.0",
+  "min_core_api": "0.24.0",
+  "name": {
+    "en": "Naim Audio",
+    "de": "Naim Audio"
+  },
+  "icon": "uc:music",
+  "description": {
+    "en": "Integration driver for Naim audio devices like Atom, Nova, Star, and Uniti series with comprehensive control of all inputs, volume, and playback functions."
+  },
+  "port": 9090,
+  "developer": {
+    "name": "Meir Miyara",
+    "email": "meir.miyara@gmail.com",
+    "url": "https://github.com/mase1981"
+  },
+  "home_page": "https://github.com/mase1981/uc-intg-naim",
+  "release_date": "2025-09-07",
+  "setup_data_schema": {
+    "title": { "en": "Naim Device Setup" },
+    "settings": [
+      {
+        "id": "host",
+        "label": { "en": "Naim Device IP Address" },
+        "field": { 
+          "text": { 
+            "value": "",
+            "placeholder": "Enter your Naim device IP address (e.g., 192.168.1.100 or 192.168.1.100:15081)"
+          } 
+        }
+      }
+    ]
+  }
+}
