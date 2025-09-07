@@ -134,7 +134,7 @@ class NaimClient:
         if callback in self._event_callbacks:
             self._event_callbacks.remove(callback)
     
-    async def _request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
+    async def _request(self, method: str, endpoint: str, json_data: Dict[str, Any] = None, **kwargs) -> Optional[Dict[str, Any]]:
         """Make HTTP request to device."""
         if not self._session:
             return None
@@ -142,10 +142,28 @@ class NaimClient:
         url = urljoin(self.base_url, endpoint)
         
         try:
-            async with self._session.request(method, url, **kwargs) as response:
+            # Prepare request kwargs
+            request_kwargs = {
+                'headers': {
+                    'User-Agent': 'Naim-Integration/1.0',
+                    'Accept': 'application/json'
+                },
+                **kwargs
+            }
+            
+            # Add JSON data if provided (for PUT requests)
+            if json_data is not None:
+                request_kwargs['json'] = json_data
+                request_kwargs['headers']['Content-Type'] = 'application/json'
+            
+            _LOG.debug("Making %s request to %s with data: %s", method, url, json_data)
+            
+            async with self._session.request(method, url, **request_kwargs) as response:
                 if response.status == 200:
                     if response.content_type == "application/json":
-                        return await response.json()
+                        result = await response.json()
+                        _LOG.debug("Response: %s", result)
+                        return result
                     else:
                         text = await response.text()
                         # Check if it's a redirect response
@@ -154,10 +172,11 @@ class NaimClient:
                             return None
                         return {"response": text}
                 else:
-                    _LOG.debug("HTTP %s: %s for %s", response.status, await response.text(), url)
+                    response_text = await response.text()
+                    _LOG.warning("HTTP %s: %s for %s - Response: %s", response.status, response.reason, url, response_text)
                     
         except Exception as e:
-            _LOG.debug("Request failed: %s %s - %s", method, url, e)
+            _LOG.error("Request failed: %s %s - %s", method, url, e)
             
         return None
     
@@ -182,13 +201,19 @@ class NaimClient:
     
     async def power_on(self) -> bool:
         """Power on the device."""
-        response = await self._request("PUT", "/power", json={"system": "on"})
-        return response is not None
+        _LOG.info("Sending power ON command")
+        response = await self._request("PUT", "/power", json_data={"system": "on"})
+        success = response is not None
+        _LOG.info("Power ON command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def power_off(self) -> bool:
         """Power off the device."""
-        response = await self._request("PUT", "/power", json={"system": "lona"})
-        return response is not None
+        _LOG.info("Sending power OFF command")
+        response = await self._request("PUT", "/power", json_data={"system": "lona"})
+        success = response is not None
+        _LOG.info("Power OFF command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def get_volume(self) -> Optional[Dict[str, Any]]:
         """Get current volume and mute state."""
@@ -199,8 +224,11 @@ class NaimClient:
         if not 0 <= volume <= 100:
             return False
             
+        _LOG.info("Setting volume to %d", volume)
         response = await self._request("PUT", f"/levels/room?volume={volume}")
-        return response is not None
+        success = response is not None
+        _LOG.info("Set volume command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def volume_up(self, step: int = 5) -> bool:
         """Increase volume by step amount."""
@@ -222,13 +250,19 @@ class NaimClient:
     
     async def mute(self) -> bool:
         """Mute audio."""
+        _LOG.info("Sending mute command")
         response = await self._request("PUT", "/levels/room?mute=on")
-        return response is not None
+        success = response is not None
+        _LOG.info("Mute command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def unmute(self) -> bool:
         """Unmute audio."""
+        _LOG.info("Sending unmute command")
         response = await self._request("PUT", "/levels/room?mute=off")
-        return response is not None
+        success = response is not None
+        _LOG.info("Unmute command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def set_source(self, source: str) -> bool:
         """Select audio source using source identifier."""
@@ -243,17 +277,23 @@ class NaimClient:
                 
                 # Check if source is selectable
                 if input_info.get("selectable") == "1":
+                    _LOG.info("Setting source to %s", source)
                     endpoint = f"/inputs/{source}?cmd=select"
                     response = await self._request("GET", endpoint)
-                    return response is not None
+                    success = response is not None
+                    _LOG.info("Set source command result: %s", "SUCCESS" if success else "FAILED")
+                    return success
                 else:
                     _LOG.warning("Source %s is not selectable", source)
                     return False
         
         # If not found in available inputs, try anyway with the source ID
+        _LOG.info("Setting source to %s (not in discovered inputs)", source)
         endpoint = f"/inputs/{source}?cmd=select"
         response = await self._request("GET", endpoint)
-        return response is not None
+        success = response is not None
+        _LOG.info("Set source command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def get_sources(self) -> List[str]:
         """Get available audio sources based on device capabilities."""
@@ -358,8 +398,11 @@ class NaimClient:
     async def set_balance(self, balance: int) -> bool:
         """Set audio balance (-50 to +50)."""
         try:
+            _LOG.info("Setting balance to %d", balance)
             response = await self._request("PUT", f"/levels/room?balance={balance}")
-            return response is not None
+            success = response is not None
+            _LOG.info("Set balance command result: %s", "SUCCESS" if success else "FAILED")
+            return success
         except Exception as e:
             _LOG.error("Set balance failed: %s", e)
             return False
