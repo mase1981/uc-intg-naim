@@ -138,12 +138,12 @@ jobs:
 
       - name: Create hash file
         run: |
-          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${INTG_NAME}.hash; done;
+          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> naim.hash; done;
 
       - name: Create release draft
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "*.tar.gz,${INTG_NAME}.hash"
+          artifacts: "*.tar.gz,naim.hash"
           draft: true
           generateReleaseNotes: true
           artifactErrorsFailBuild: true
