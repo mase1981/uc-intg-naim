@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uc-intg-naim"
+dynamic = ["version"]
+description = "Naim Audio Integration for Unfolded Circle Remote Two/3"
+readme = "README.md"
+authors = [
+    {name = "Meir Miyara", email = "meir.miyara@gmail.com"}
+]
+license = {text = "MPL-2.0"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Home Automation",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "ucapi>=0.3.1",
+    "aiohttp>=3.8.0",
+    "websockets>=10.0",
+    "certifi>=2022.0.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mase1981/uc-intg-naim"
+"Bug Reports" = "https://github.com/mase1981/uc-intg-naim/issues"
+"Source" = "https://github.com/mase1981/uc-intg-naim"
+
+[project.scripts]
+uc-intg-naim = "uc_intg_naim.driver:main"
+
+[tool.setuptools]
+packages = ["uc_intg_naim"]
+
+[tool.setuptools.package-data]
+uc_intg_naim = ["*.json"]
+
+[tool.setuptools.dynamic]
+version = {attr = "uc_intg_naim.__version__"}
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=22.0",
+    "flake8>=5.0",
+    "mypy>=1.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
