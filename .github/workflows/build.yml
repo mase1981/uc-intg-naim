@@ -60,7 +60,7 @@ jobs:
           mv dist/intg-${{ env.DRIVER_ID }}/* artifacts/bin
           mv artifacts/bin/intg-${{ env.DRIVER_ID }} artifacts/bin/driver
           cp driver.json artifacts/
-          echo "ARTIFACT_NAME=uc-intg-${{ env.DRIVER_ID }}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=uc-intg-${INTG_NAME}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
           
       - name: Create upload artifact archive
         shell: bash
@@ -121,6 +121,8 @@ jobs:
     needs: [build, docker]
     permissions:
       contents: write
+    env:
+      INTG_NAME: naim
 
     steps:
       - name: Download build artifacts
@@ -139,12 +141,12 @@ jobs:
 
       - name: Create hash file
         run: |
-          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${{needs.build.outputs.driver_id}}.hash; done;
+          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${INTG_NAME}.hash; done;
 
       - name: Create release draft
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "*.tar.gz,${{needs.build.outputs.driver_id}}.hash"
+          artifacts: "*.tar.gz,${{ env.INTG_NAME }}.hash"
           draft: true
           generateReleaseNotes: true
           artifactErrorsFailBuild: true
