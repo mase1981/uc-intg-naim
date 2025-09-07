@@ -51,16 +51,15 @@ jobs:
             bash -c \
             "cd /workspace && \
               python -m pip install -r requirements.txt && \
-              pyinstaller --clean --onedir --name intg-${DRIVER_ID} --collect-all zeroconf uc_intg_naim/driver.py"
+              pyinstaller --clean --onedir --name driver uc_intg_naim/driver.py"
 
       - name: Prepare artifacts
         shell: bash
         run: |
           mkdir -p artifacts/bin
-          mv dist/intg-${{ env.DRIVER_ID }}/* artifacts/bin
-          mv artifacts/bin/intg-${{ env.DRIVER_ID }} artifacts/bin/driver
+          mv dist/driver/* artifacts/bin/
           cp driver.json artifacts/
-          echo "ARTIFACT_NAME=uc-intg-${{ env.DRIVER_ID }}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=uc-intg-${INTG_NAME}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
           
       - name: Create upload artifact archive
         shell: bash
@@ -139,12 +138,12 @@ jobs:
 
       - name: Create hash file
         run: |
-          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${{needs.build.outputs.driver_id}}.hash; done;
+          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${INTG_NAME}.hash; done;
 
       - name: Create release draft
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "*.tar.gz,${{needs.build.outputs.driver_id}}.hash"
+          artifacts: "*.tar.gz,${INTG_NAME}.hash"
           draft: true
           generateReleaseNotes: true
           artifactErrorsFailBuild: true

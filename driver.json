@@ -1,6 +1,6 @@
 {
-  "driver_id": "uc_naim_driver",
-  "version": "1.0.1",
+  "driver_id": "naim",
+  "version": "1.0.2",
   "min_core_api": "0.24.0",
   "name": {
     "en": "Naim Audio",
