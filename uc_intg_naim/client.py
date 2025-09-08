@@ -71,6 +71,9 @@ class NaimClient:
         self._available_inputs: List[Dict[str, Any]] = []
         self._device_info: Dict[str, Any] = {}
         
+        # CRITICAL FIX: Initialize api_base properly
+        self.api_base = self.base_url  # Will be updated during connection if /naim prefix detected
+        
     async def connect(self) -> bool:
         """Connect to the Naim device."""
         try:
@@ -78,11 +81,36 @@ class NaimClient:
                 timeout = aiohttp.ClientTimeout(total=10)
                 self._session = aiohttp.ClientSession(timeout=timeout)
             
-            # Test connection with root endpoint first
+            # CRITICAL FIX: Improved API prefix detection
+            # Test connection with root endpoint first to detect API prefix
             root_data = await self._request("GET", "/")
             if not root_data:
                 _LOG.error("Could not connect to Naim device root endpoint")
                 return False
+            
+            # CRITICAL FIX: Check if root endpoint indicates /naim prefix is needed
+            api_prefix_detected = False
+            if isinstance(root_data, dict) and "raw_response" in root_data:
+                response_text = root_data["raw_response"]
+                if "naim/index.fcgi" in response_text or "naim/" in response_text:
+                    # Device uses /naim prefix
+                    self.api_base = f"{self.base_url}/naim"
+                    api_prefix_detected = True
+                    _LOG.info("Detected Naim API prefix: /naim")
+            
+            # CRITICAL FIX: Test the detected API base with a known endpoint
+            if api_prefix_detected:
+                # Test with /naim prefix
+                test_endpoints = ["/nowplaying", "/system", "/inputs"]
+                for endpoint in test_endpoints:
+                    test_data = await self._request("GET", endpoint)
+                    if test_data:
+                        _LOG.info(f"Confirmed API prefix /naim working with {endpoint}")
+                        break
+                else:
+                    # If /naim prefix tests fail, fall back to no prefix
+                    _LOG.warning("API prefix /naim detected but tests failed, falling back to root")
+                    self.api_base = self.base_url
             
             # Get system info to determine device capabilities
             system_info = await self._request("GET", "/system")
@@ -91,6 +119,7 @@ class NaimClient:
                 model = system_info.get("model", "Unknown")
                 hostname = system_info.get("hostname", f"Naim Device ({self.host})")
                 _LOG.info(f"Connected to Naim device: Model {model}, Name: {hostname}")
+                _LOG.info(f"Using API base: {self.api_base}")
             
             # Get available inputs
             inputs_data = await self._request("GET", "/inputs")
@@ -139,7 +168,8 @@ class NaimClient:
         if not self._session:
             return None
             
-        url = urljoin(self.base_url, endpoint)
+        # CRITICAL FIX: Use api_base instead of base_url for all requests
+        url = urljoin(self.api_base, endpoint)
         
         try:
             # Prepare request kwargs
@@ -169,7 +199,7 @@ class NaimClient:
                         # Check if it's a redirect response
                         if "refresh" in text.lower() and "naim" in text.lower():
                             _LOG.debug("Received redirect response, endpoint may not be valid")
-                            return None
+                            return {"raw_response": text, "status_code": response.status}
                         return {"response": text}
                 else:
                     response_text = await response.text()
