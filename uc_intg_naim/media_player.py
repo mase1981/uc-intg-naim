@@ -36,13 +36,15 @@ class NaimMediaPlayer(MediaPlayer):
         self._attr_media_image_url = ""
         self._attr_source = ""
         self._attr_source_list = []
+        self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+        self._attr_shuffle = False
         self._update_task: Optional[asyncio.Task] = None
         self._last_status = {}
         self._connected = False
         self._monitoring = False
         self._integration_api = None
         
-        # Initialize entity with ALL media player features
+        # Initialize entity with ALL media player features including physical buttons
         entity_id = f"naim_{device_config.id}"
         features = [
             ucapi.media_player.Features.ON_OFF,
@@ -68,6 +70,38 @@ class NaimMediaPlayer(MediaPlayer):
             ucapi.media_player.Features.MEDIA_IMAGE_URL
         ]
         
+        # Define simple commands for physical button mapping
+        simple_commands = [
+            # Power controls
+            "POWER_ON",
+            "POWER_OFF",
+            "POWER_TOGGLE",
+            
+            # Playback controls
+            "PLAY",
+            "PAUSE", 
+            "PLAY_PAUSE",
+            "STOP",
+            "NEXT",
+            "PREVIOUS",
+            "FORWARD",
+            "REWIND",
+            
+            # Navigation controls
+            "UP",
+            "DOWN",
+            "LEFT", 
+            "RIGHT",
+            "OK",
+            "BACK",
+            "PAGE_UP",
+            "PAGE_DOWN",
+            
+            # Audio controls
+            "SHUFFLE_TOGGLE",
+            "REPEAT_TOGGLE"
+        ]
+        
         attributes = {
             ucapi.media_player.Attributes.STATE: self._attr_state,
             ucapi.media_player.Attributes.VOLUME: self._attr_volume,
@@ -80,8 +114,8 @@ class NaimMediaPlayer(MediaPlayer):
             ucapi.media_player.Attributes.MEDIA_IMAGE_URL: self._attr_media_image_url,
             ucapi.media_player.Attributes.SOURCE: self._attr_source,
             ucapi.media_player.Attributes.SOURCE_LIST: self._attr_source_list,
-            ucapi.media_player.Attributes.REPEAT: ucapi.media_player.RepeatMode.OFF,
-            ucapi.media_player.Attributes.SHUFFLE: False
+            ucapi.media_player.Attributes.REPEAT: self._attr_repeat,
+            ucapi.media_player.Attributes.SHUFFLE: self._attr_shuffle
         }
         
         super().__init__(
@@ -90,6 +124,7 @@ class NaimMediaPlayer(MediaPlayer):
             features,
             attributes,
             device_class=ucapi.media_player.DeviceClasses.STREAMING_BOX,
+            simple_commands=simple_commands,
             cmd_handler=self.command_handler
         )
         
@@ -101,8 +136,16 @@ class NaimMediaPlayer(MediaPlayer):
         _LOG.info("Command: %s, params: %s", cmd_id, params)
         
         try:
+            # Handle simple commands first (physical buttons)
+            if cmd_id in ["POWER_ON", "POWER_OFF", "POWER_TOGGLE", "PLAY", "PAUSE", "PLAY_PAUSE", 
+                         "STOP", "NEXT", "PREVIOUS", "FORWARD", "REWIND", "UP", "DOWN", "LEFT", 
+                         "RIGHT", "OK", "BACK", "PAGE_UP", "PAGE_DOWN", "SHUFFLE_TOGGLE", "REPEAT_TOGGLE"]:
+                success = await self._handle_simple_command(cmd_id)
+                await self.update_attributes()
+                return ucapi.StatusCodes.OK if success else ucapi.StatusCodes.SERVER_ERROR
+            
             # Power commands
-            if cmd_id == ucapi.media_player.Commands.ON:
+            elif cmd_id == ucapi.media_player.Commands.ON:
                 success = await self._client.power_on()
             elif cmd_id == ucapi.media_player.Commands.OFF:
                 success = await self._client.power_off()
@@ -157,9 +200,20 @@ class NaimMediaPlayer(MediaPlayer):
             elif cmd_id == ucapi.media_player.Commands.REPEAT:
                 repeat_mode = params.get("repeat", "OFF") if params else "OFF"
                 success = await self._client.set_repeat(repeat_mode)
+                # Update local state
+                if success:
+                    if repeat_mode == "OFF":
+                        self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+                    elif repeat_mode == "ONE":
+                        self._attr_repeat = ucapi.media_player.RepeatMode.ONE
+                    elif repeat_mode == "ALL":
+                        self._attr_repeat = ucapi.media_player.RepeatMode.ALL
             elif cmd_id == ucapi.media_player.Commands.SHUFFLE:
                 shuffle_state = params.get("shuffle", False) if params else False
                 success = await self._client.set_shuffle(shuffle_state)
+                # Update local state
+                if success:
+                    self._attr_shuffle = shuffle_state
             
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
@@ -173,6 +227,76 @@ class NaimMediaPlayer(MediaPlayer):
         except Exception as e:
             _LOG.error("Command %s failed: %s", cmd_id, e)
             return ucapi.StatusCodes.SERVER_ERROR
+    
+    async def _handle_simple_command(self, command: str) -> bool:
+        """Handle simple commands for physical button mapping."""
+        try:
+            # Power controls
+            if command == "POWER_ON":
+                return await self._client.power_on()
+            elif command == "POWER_OFF":
+                return await self._client.power_off()
+            elif command == "POWER_TOGGLE":
+                power_state = await self._client.get_power_state()
+                if power_state:
+                    return await self._client.power_off()
+                else:
+                    return await self._client.power_on()
+            
+            # Playback controls
+            elif command == "PLAY":
+                return await self._client.play()
+            elif command == "PAUSE":
+                return await self._client.pause()
+            elif command == "PLAY_PAUSE":
+                status = await self._client.get_status()
+                if status and status.get("transportState") == "2":  # playing
+                    return await self._client.pause()
+                else:
+                    return await self._client.play()
+            elif command == "STOP":
+                return await self._client.stop()
+            elif command == "NEXT":
+                return await self._client.next_track()
+            elif command == "PREVIOUS":
+                return await self._client.previous_track()
+            elif command == "FORWARD":
+                return await self._client.next_track()  # Same as next
+            elif command == "REWIND":
+                return await self._client.previous_track()  # Same as previous
+            
+            # Navigation controls (limited support)
+            elif command in ["UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "PAGE_UP", "PAGE_DOWN"]:
+                _LOG.info(f"Navigation command {command} - limited support on Naim devices")
+                return True
+            
+            # Audio controls
+            elif command == "SHUFFLE_TOGGLE":
+                success = await self._client.set_shuffle(not self._attr_shuffle)
+                if success:
+                    self._attr_shuffle = not self._attr_shuffle
+                return success
+            elif command == "REPEAT_TOGGLE":
+                # Cycle through repeat modes: OFF -> ONE -> ALL -> OFF
+                if self._attr_repeat == ucapi.media_player.RepeatMode.OFF:
+                    new_mode = "ONE"
+                    self._attr_repeat = ucapi.media_player.RepeatMode.ONE
+                elif self._attr_repeat == ucapi.media_player.RepeatMode.ONE:
+                    new_mode = "ALL"
+                    self._attr_repeat = ucapi.media_player.RepeatMode.ALL
+                else:
+                    new_mode = "OFF"
+                    self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+                
+                return await self._client.set_repeat(new_mode)
+            
+            else:
+                _LOG.warning("Unsupported simple command: %s", command)
+                return False
+                
+        except Exception as e:
+            _LOG.error("Error executing simple command %s: %s", command, e)
+            return False
     
     async def connect(self) -> bool:
         """Connect to Naim device."""
@@ -291,6 +415,14 @@ class NaimMediaPlayer(MediaPlayer):
             self._attr_media_album = status.get("album", "")
             self._attr_media_image_url = status.get("artwork", "")
             
+            # Update repeat and shuffle from status if available
+            if status.get("repeat", "0") == "1":
+                self._attr_repeat = ucapi.media_player.RepeatMode.ONE
+            else:
+                self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+            
+            self._attr_shuffle = status.get("shuffle", "0") == "1"
+            
             # Extract source from ussi
             source_ussi = status.get("source", "")
             if source_ussi.startswith("inputs/"):
@@ -323,8 +455,8 @@ class NaimMediaPlayer(MediaPlayer):
             ucapi.media_player.Attributes.MEDIA_IMAGE_URL: self._attr_media_image_url,
             ucapi.media_player.Attributes.SOURCE: self._attr_source,
             ucapi.media_player.Attributes.SOURCE_LIST: self._attr_source_list,
-            ucapi.media_player.Attributes.REPEAT: ucapi.media_player.RepeatMode.OFF,
-            ucapi.media_player.Attributes.SHUFFLE: False
+            ucapi.media_player.Attributes.REPEAT: self._attr_repeat,
+            ucapi.media_player.Attributes.SHUFFLE: self._attr_shuffle
         }
         
         # Update the entity's attributes
