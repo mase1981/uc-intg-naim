@@ -3,7 +3,7 @@
 Control your Naim audio devices directly from your Unfolded Circle Remote 2 or Remote 3.
 
 ![Naim Audio](https://img.shields.io/badge/Naim-Audio-blue)
-![Version](https://img.shields.io/badge/version-1.0.6-green)
+![Version](https://img.shields.io/badge/version-1.0.8-green)
 ![License](https://img.shields.io/badge/license-MPL--2.0-blue)
 [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg)](https://buymeacoffee.com/meirmiyara)
 [![PayPal](https://img.shields.io/badge/PayPal-donate-blue.svg)](https://paypal.me/mmiyara)
