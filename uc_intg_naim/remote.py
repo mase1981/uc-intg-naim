@@ -44,6 +44,26 @@ class NaimRemote(Remote):
             "MUTE",
             "UNMUTE",
             
+            # Playback controls
+            "PLAY",
+            "PAUSE",
+            "PLAY_PAUSE",
+            "STOP",
+            "NEXT",
+            "PREVIOUS",
+            "FORWARD",
+            "REWIND",
+            
+            # Navigation controls
+            "UP",
+            "DOWN", 
+            "LEFT",
+            "RIGHT",
+            "OK",
+            "BACK",
+            "PAGE_UP",
+            "PAGE_DOWN",
+            
             # Source selection - all discovered inputs
             "SOURCE_ANA1",      # Analogue 1
             "SOURCE_DIG1",      # Digital 1
@@ -133,6 +153,33 @@ class NaimRemote(Remote):
                 return await self._client.mute()
             elif command == "UNMUTE":
                 return await self._client.unmute()
+            
+            # Playback controls  
+            elif command == "PLAY":
+                return await self._client.play()
+            elif command == "PAUSE":
+                return await self._client.pause()
+            elif command == "PLAY_PAUSE":
+                status = await self._client.get_status()
+                if status and status.get("transportState") == "2":  # playing
+                    return await self._client.pause()
+                else:
+                    return await self._client.play()
+            elif command == "STOP":
+                return await self._client.stop()
+            elif command == "NEXT":
+                return await self._client.next_track()
+            elif command == "PREVIOUS":
+                return await self._client.previous_track()
+            elif command == "FORWARD":
+                return await self._client.next_track()  # Same as next
+            elif command == "REWIND":
+                return await self._client.previous_track()  # Same as previous
+            
+            # Navigation controls (limited support)
+            elif command in ["UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "PAGE_UP", "PAGE_DOWN"]:
+                _LOG.info(f"Navigation command {command} - limited support on Naim devices")
+                return True
                 
             # Source selection - all discovered inputs
             elif command == "SOURCE_ANA1":
