@@ -36,6 +36,8 @@ class NaimMediaPlayer(MediaPlayer):
         self._attr_media_image_url = ""
         self._attr_source = ""
         self._attr_source_list = []
+        self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+        self._attr_shuffle = False
         self._update_task: Optional[asyncio.Task] = None
         self._last_status = {}
         self._connected = False
@@ -80,10 +82,11 @@ class NaimMediaPlayer(MediaPlayer):
             ucapi.media_player.Attributes.MEDIA_IMAGE_URL: self._attr_media_image_url,
             ucapi.media_player.Attributes.SOURCE: self._attr_source,
             ucapi.media_player.Attributes.SOURCE_LIST: self._attr_source_list,
-            ucapi.media_player.Attributes.REPEAT: ucapi.media_player.RepeatMode.OFF,
-            ucapi.media_player.Attributes.SHUFFLE: False
+            ucapi.media_player.Attributes.REPEAT: self._attr_repeat,
+            ucapi.media_player.Attributes.SHUFFLE: self._attr_shuffle
         }
         
+        # ✅ FIXED: Remove simple_commands parameter - MediaPlayer doesn't support it
         super().__init__(
             entity_id,
             device_config.name,
@@ -157,9 +160,20 @@ class NaimMediaPlayer(MediaPlayer):
             elif cmd_id == ucapi.media_player.Commands.REPEAT:
                 repeat_mode = params.get("repeat", "OFF") if params else "OFF"
                 success = await self._client.set_repeat(repeat_mode)
+                # Update local state
+                if success:
+                    if repeat_mode == "OFF":
+                        self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+                    elif repeat_mode == "ONE":
+                        self._attr_repeat = ucapi.media_player.RepeatMode.ONE
+                    elif repeat_mode == "ALL":
+                        self._attr_repeat = ucapi.media_player.RepeatMode.ALL
             elif cmd_id == ucapi.media_player.Commands.SHUFFLE:
                 shuffle_state = params.get("shuffle", False) if params else False
                 success = await self._client.set_shuffle(shuffle_state)
+                # Update local state
+                if success:
+                    self._attr_shuffle = shuffle_state
             
             else:
                 _LOG.warning("Unsupported command: %s", cmd_id)
@@ -291,6 +305,14 @@ class NaimMediaPlayer(MediaPlayer):
             self._attr_media_album = status.get("album", "")
             self._attr_media_image_url = status.get("artwork", "")
             
+            # Update repeat and shuffle from status if available
+            if status.get("repeat", "0") == "1":
+                self._attr_repeat = ucapi.media_player.RepeatMode.ONE
+            else:
+                self._attr_repeat = ucapi.media_player.RepeatMode.OFF
+            
+            self._attr_shuffle = status.get("shuffle", "0") == "1"
+            
             # Extract source from ussi
             source_ussi = status.get("source", "")
             if source_ussi.startswith("inputs/"):
@@ -323,8 +345,8 @@ class NaimMediaPlayer(MediaPlayer):
             ucapi.media_player.Attributes.MEDIA_IMAGE_URL: self._attr_media_image_url,
             ucapi.media_player.Attributes.SOURCE: self._attr_source,
             ucapi.media_player.Attributes.SOURCE_LIST: self._attr_source_list,
-            ucapi.media_player.Attributes.REPEAT: ucapi.media_player.RepeatMode.OFF,
-            ucapi.media_player.Attributes.SHUFFLE: False
+            ucapi.media_player.Attributes.REPEAT: self._attr_repeat,
+            ucapi.media_player.Attributes.SHUFFLE: self._attr_shuffle
         }
         
         # Update the entity's attributes

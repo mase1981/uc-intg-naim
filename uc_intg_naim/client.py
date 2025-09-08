@@ -71,6 +71,9 @@ class NaimClient:
         self._available_inputs: List[Dict[str, Any]] = []
         self._device_info: Dict[str, Any] = {}
         
+        # Initialize api_base properly
+        self.api_base = self.base_url  # Will be updated during connection if /naim prefix detected
+        
     async def connect(self) -> bool:
         """Connect to the Naim device."""
         try:
@@ -78,11 +81,35 @@ class NaimClient:
                 timeout = aiohttp.ClientTimeout(total=10)
                 self._session = aiohttp.ClientSession(timeout=timeout)
             
-            # Test connection with root endpoint first
+            # Test connection with root endpoint first to detect API prefix
             root_data = await self._request("GET", "/")
             if not root_data:
                 _LOG.error("Could not connect to Naim device root endpoint")
                 return False
+            
+            # Check if root endpoint indicates /naim prefix is needed
+            api_prefix_detected = False
+            if isinstance(root_data, dict) and "raw_response" in root_data:
+                response_text = root_data["raw_response"]
+                if "naim/index.fcgi" in response_text or "naim/" in response_text:
+                    # Device uses /naim prefix
+                    self.api_base = f"{self.base_url}/naim"
+                    api_prefix_detected = True
+                    _LOG.info("Detected Naim API prefix: /naim")
+            
+            # Test the detected API base with a known endpoint
+            if api_prefix_detected:
+                # Test with /naim prefix
+                test_endpoints = ["/nowplaying", "/system", "/inputs"]
+                for endpoint in test_endpoints:
+                    test_data = await self._request("GET", endpoint)
+                    if test_data:
+                        _LOG.info(f"Confirmed API prefix /naim working with {endpoint}")
+                        break
+                else:
+                    # If /naim prefix tests fail, fall back to no prefix
+                    _LOG.warning("API prefix /naim detected but tests failed, falling back to root")
+                    self.api_base = self.base_url
             
             # Get system info to determine device capabilities
             system_info = await self._request("GET", "/system")
@@ -91,6 +118,7 @@ class NaimClient:
                 model = system_info.get("model", "Unknown")
                 hostname = system_info.get("hostname", f"Naim Device ({self.host})")
                 _LOG.info(f"Connected to Naim device: Model {model}, Name: {hostname}")
+                _LOG.info(f"Using API base: {self.api_base}")
             
             # Get available inputs
             inputs_data = await self._request("GET", "/inputs")
@@ -139,7 +167,7 @@ class NaimClient:
         if not self._session:
             return None
             
-        url = urljoin(self.base_url, endpoint)
+        url = urljoin(self.api_base, endpoint)
         
         try:
             # Prepare request kwargs
@@ -151,12 +179,12 @@ class NaimClient:
                 **kwargs
             }
             
-            # Add JSON data if provided (for PUT requests)
+            # NOTE: Most Naim commands use URL parameters, not JSON payloads
             if json_data is not None:
                 request_kwargs['json'] = json_data
                 request_kwargs['headers']['Content-Type'] = 'application/json'
             
-            _LOG.debug("Making %s request to %s with data: %s", method, url, json_data)
+            _LOG.debug("Making %s request to %s", method, url)
             
             async with self._session.request(method, url, **request_kwargs) as response:
                 if response.status == 200:
@@ -169,7 +197,7 @@ class NaimClient:
                         # Check if it's a redirect response
                         if "refresh" in text.lower() and "naim" in text.lower():
                             _LOG.debug("Received redirect response, endpoint may not be valid")
-                            return None
+                            return {"raw_response": text, "status_code": response.status}
                         return {"response": text}
                 else:
                     response_text = await response.text()
@@ -200,17 +228,17 @@ class NaimClient:
         return None
     
     async def power_on(self) -> bool:
-        """Power on the device."""
+        """Power on the device - FIXED: Use URL parameters not JSON."""
         _LOG.info("Sending power ON command")
-        response = await self._request("PUT", "/power", json_data={"system": "on"})
+        response = await self._request("PUT", "/power?system=on")
         success = response is not None
         _LOG.info("Power ON command result: %s", "SUCCESS" if success else "FAILED")
         return success
     
     async def power_off(self) -> bool:
-        """Power off the device."""
+        """Power off the device - FIXED: Use URL parameters and 'lona' value."""
         _LOG.info("Sending power OFF command")
-        response = await self._request("PUT", "/power", json_data={"system": "lona"})
+        response = await self._request("PUT", "/power?system=lona")
         success = response is not None
         _LOG.info("Power OFF command result: %s", "SUCCESS" if success else "FAILED")
         return success
@@ -249,17 +277,17 @@ class NaimClient:
         return False
     
     async def mute(self) -> bool:
-        """Mute audio."""
+        """Mute audio - FIXED: Use mute=1 not mute=on."""
         _LOG.info("Sending mute command")
-        response = await self._request("PUT", "/levels/room?mute=on")
+        response = await self._request("PUT", "/levels/room?mute=1")
         success = response is not None
         _LOG.info("Mute command result: %s", "SUCCESS" if success else "FAILED")
         return success
     
     async def unmute(self) -> bool:
-        """Unmute audio."""
+        """Unmute audio - FIXED: Use mute=0 not mute=off."""
         _LOG.info("Sending unmute command")
-        response = await self._request("PUT", "/levels/room?mute=off")
+        response = await self._request("PUT", "/levels/room?mute=0")
         success = response is not None
         _LOG.info("Unmute command result: %s", "SUCCESS" if success else "FAILED")
         return success
@@ -354,58 +382,60 @@ class NaimClient:
         """Get detailed information about available inputs."""
         return self._available_inputs
     
-    # Playback control methods (these are typically not directly supported by Naim API)
+    # Playback control methods - FIXED: Use actual Naim API endpoints from forum
     async def play(self) -> bool:
-        """Start playback - limited support on Naim devices."""
-        _LOG.info("Play command - limited support on Naim devices")
-        return True
+        """Start playback - FIXED: Use nowplaying API."""
+        _LOG.info("Sending play command")
+        response = await self._request("GET", "/nowplaying?cmd=play")
+        success = response is not None
+        _LOG.info("Play command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def pause(self) -> bool:
-        """Pause playback - limited support on Naim devices."""
-        _LOG.info("Pause command - limited support on Naim devices")
-        return True
+        """Pause playback - FIXED: Use nowplaying API."""
+        _LOG.info("Sending pause command")
+        response = await self._request("GET", "/nowplaying?cmd=pause")
+        success = response is not None
+        _LOG.info("Pause command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def stop(self) -> bool:
-        """Stop playback - limited support on Naim devices."""
-        _LOG.info("Stop command - limited support on Naim devices")
-        return True
+        """Stop playback - FIXED: Use nowplaying API."""
+        _LOG.info("Sending stop command")
+        response = await self._request("GET", "/nowplaying?cmd=stop")
+        success = response is not None
+        _LOG.info("Stop command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def next_track(self) -> bool:
-        """Skip to next track - limited support on Naim devices."""
-        _LOG.info("Next track command - limited support on Naim devices")
-        return True
+        """Skip to next track - NOT SUPPORTED by basic Naim API."""
+        _LOG.warning("Next track command - not supported by basic Naim HTTP API")
+        return False
     
     async def previous_track(self) -> bool:
-        """Go to previous track - limited support on Naim devices."""
-        _LOG.info("Previous track command - limited support on Naim devices")
-        return True
+        """Go to previous track - NOT SUPPORTED by basic Naim API."""
+        _LOG.warning("Previous track command - not supported by basic Naim HTTP API")
+        return False
     
     async def seek(self, position: int) -> bool:
-        """Seek to position in seconds - limited support on Naim devices."""
-        _LOG.info("Seek command to %d - limited support on Naim devices", position)
-        return True
+        """Seek to position in seconds - NOT SUPPORTED by basic Naim API."""
+        _LOG.warning("Seek command - not supported by basic Naim HTTP API")
+        return False
     
     async def set_repeat(self, mode: str) -> bool:
-        """Set repeat mode - limited support on Naim devices."""
-        _LOG.info("Set repeat %s - limited support on Naim devices", mode)
-        return True
+        """Set repeat mode - NOT SUPPORTED by basic Naim API."""
+        _LOG.warning("Set repeat - not supported by basic Naim HTTP API")
+        return False
     
     async def set_shuffle(self, enabled: bool) -> bool:
-        """Set shuffle mode - limited support on Naim devices."""
-        _LOG.info("Set shuffle %s - limited support on Naim devices", enabled)
-        return True
+        """Set shuffle mode - NOT SUPPORTED by basic Naim API."""
+        _LOG.warning("Set shuffle - not supported by basic Naim HTTP API")
+        return False
     
     async def set_balance(self, balance: int) -> bool:
-        """Set audio balance (-50 to +50)."""
-        try:
-            _LOG.info("Setting balance to %d", balance)
-            response = await self._request("PUT", f"/levels/room?balance={balance}")
-            success = response is not None
-            _LOG.info("Set balance command result: %s", "SUCCESS" if success else "FAILED")
-            return success
-        except Exception as e:
-            _LOG.error("Set balance failed: %s", e)
-            return False
+        """Set audio balance - NOT SUPPORTED by basic Naim API."""
+        _LOG.warning("Balance control - not supported by basic Naim HTTP API")
+        return False
     
     def _transport_state_to_play_state(self, transport_state: str) -> str:
         """Convert transport state to play state."""
