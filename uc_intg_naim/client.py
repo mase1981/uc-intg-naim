@@ -71,7 +71,7 @@ class NaimClient:
         self._available_inputs: List[Dict[str, Any]] = []
         self._device_info: Dict[str, Any] = {}
         
-        # CRITICAL FIX: Initialize api_base properly
+        # Initialize api_base properly
         self.api_base = self.base_url  # Will be updated during connection if /naim prefix detected
         
     async def connect(self) -> bool:
@@ -81,14 +81,13 @@ class NaimClient:
                 timeout = aiohttp.ClientTimeout(total=10)
                 self._session = aiohttp.ClientSession(timeout=timeout)
             
-            # CRITICAL FIX: Improved API prefix detection
             # Test connection with root endpoint first to detect API prefix
             root_data = await self._request("GET", "/")
             if not root_data:
                 _LOG.error("Could not connect to Naim device root endpoint")
                 return False
             
-            # CRITICAL FIX: Check if root endpoint indicates /naim prefix is needed
+            # Check if root endpoint indicates /naim prefix is needed
             api_prefix_detected = False
             if isinstance(root_data, dict) and "raw_response" in root_data:
                 response_text = root_data["raw_response"]
@@ -98,7 +97,7 @@ class NaimClient:
                     api_prefix_detected = True
                     _LOG.info("Detected Naim API prefix: /naim")
             
-            # CRITICAL FIX: Test the detected API base with a known endpoint
+            # Test the detected API base with a known endpoint
             if api_prefix_detected:
                 # Test with /naim prefix
                 test_endpoints = ["/nowplaying", "/system", "/inputs"]
@@ -168,7 +167,6 @@ class NaimClient:
         if not self._session:
             return None
             
-        # CRITICAL FIX: Use api_base instead of base_url for all requests
         url = urljoin(self.api_base, endpoint)
         
         try:
@@ -181,7 +179,7 @@ class NaimClient:
                 **kwargs
             }
             
-            # Add JSON data if provided (for PUT requests)
+            # CRITICAL FIX: Add JSON data with proper headers for PUT requests
             if json_data is not None:
                 request_kwargs['json'] = json_data
                 request_kwargs['headers']['Content-Type'] = 'application/json'
@@ -238,9 +236,8 @@ class NaimClient:
         return success
     
     async def power_off(self) -> bool:
-        """Power off the device."""
         _LOG.info("Sending power OFF command")
-        response = await self._request("PUT", "/power", json_data={"system": "lona"})
+        response = await self._request("PUT", "/power", json_data={"system": "standby"})
         success = response is not None
         _LOG.info("Power OFF command result: %s", "SUCCESS" if success else "FAILED")
         return success
@@ -426,10 +423,14 @@ class NaimClient:
         return True
     
     async def set_balance(self, balance: int) -> bool:
-        """Set audio balance (-50 to +50)."""
+        if not -50 <= balance <= 50:
+            _LOG.warning("Balance value %d out of range (-50 to 50)", balance)
+            return False
+            
         try:
             _LOG.info("Setting balance to %d", balance)
-            response = await self._request("PUT", f"/levels/room?balance={balance}")
+            # Use levels endpoint instead of levels/room for balance
+            response = await self._request("PUT", f"/levels?balance={balance}")
             success = response is not None
             _LOG.info("Set balance command result: %s", "SUCCESS" if success else "FAILED")
             return success
