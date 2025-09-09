@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_naim_driver",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "min_core_api": "0.24.0",
   "name": {
     "en": "Naim Audio",
@@ -8,7 +8,7 @@
   },
   "icon": "uc:music",
   "description": {
-    "en": "Integration driver for Naim audio devices like Atom, Nova, Star, and Uniti series with comprehensive control of all inputs, volume, and playback functions."
+    "en": "Integration driver for Naim audio devices like Atom, Nova, Star, and Uniti series with comprehensive control of all inputs, volume, and playback functions. Supports multiple devices."
   },
   "port": 9090,
   "developer": {
@@ -20,14 +20,28 @@
   "release_date": "2025-09-07",
   "setup_data_schema": {
     "title": { "en": "Naim Device Setup" },
+    "description": { "en": "Configure your Naim audio devices. You can set up one or multiple devices." },
     "settings": [
       {
+        "id": "device_count",
+        "label": { "en": "Number of Devices" },
+        "description": { "en": "How many Naim devices do you want to configure?" },
+        "field": { 
+          "number": { 
+            "value": 1,
+            "min": 1, 
+            "max": 10 
+          } 
+        }
+      },
+      {
         "id": "host",
-        "label": { "en": "Naim Device IP Address" },
+        "label": { "en": "Device IP Address (Single Device Only)" },
+        "description": { "en": "For single device setup only. Enter your Naim device IP address (e.g., 192.168.1.100 or 192.168.1.100:15081). Leave empty if configuring multiple devices." },
         "field": { 
           "text": { 
             "value": "",
-            "placeholder": "Enter your Naim device IP address (e.g., 192.168.1.100 or 192.168.1.100:15081)"
+            "placeholder": "192.168.1.100 or 192.168.1.100:15081"
           } 
         }
       }

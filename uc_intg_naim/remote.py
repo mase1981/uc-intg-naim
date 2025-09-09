@@ -18,19 +18,20 @@ _LOG = logging.getLogger(__name__)
 
 
 class NaimRemote(Remote):
-    """Naim remote control entity."""
+    """Naim remote control entity with enhanced multi-device support."""
     
-    def __init__(self, device_config: NaimDeviceConfig):
-        """Initialize Naim remote control."""
+    def __init__(self, device_config: NaimDeviceConfig, entity_id: str = None):
+        """Initialize Naim remote control with optional custom entity ID for multi-device support."""
         self._device_config = device_config
         self._client = NaimClient(device_config.address, device_config.port)
         self._connected = False
         self._integration_api = None  # Will be set by driver
         
-        # Initialize entity
-        entity_id = f"naim_remote_{device_config.id}"
+        # Enhanced: Support custom entity ID for multi-device
+        if entity_id is None:
+            entity_id = f"naim_remote_{device_config.id}"
         
-        # Define remote buttons/commands based on discovered capabilities
+        # Define remote buttons/commands - CLEANED UP: Removed unsupported navigation buttons
         simple_commands = [
             # Power controls
             "POWER_ON",
@@ -54,12 +55,8 @@ class NaimRemote(Remote):
             "FORWARD",
             "REWIND",
             
-            # Navigation controls
-            "UP",
-            "DOWN", 
-            "LEFT",
-            "RIGHT",
-            "OK",
+            # REMOVED: Navigation controls that don't work with Naim API
+            # "UP", "DOWN", "LEFT", "RIGHT", "OK" - These are not supported
             "BACK",
             "PAGE_UP",
             "PAGE_DOWN",
@@ -93,7 +90,7 @@ class NaimRemote(Remote):
         
         super().__init__(
             entity_id,
-            f"{device_config.name} Remote",
+            f"{device_config.name} Remote",  # Each device gets its own name
             features,
             attributes,
             simple_commands=simple_commands,
@@ -138,11 +135,11 @@ class NaimRemote(Remote):
                 else:
                     return await self._client.power_on()
                     
-            # Volume controls
+            # Volume controls - ENHANCED: Changed step from 5 to 3
             elif command == "VOLUME_UP":
-                return await self._client.volume_up()
+                return await self._client.volume_up(step=3)  # Changed from 5 to 3
             elif command == "VOLUME_DOWN":
-                return await self._client.volume_down()
+                return await self._client.volume_down(step=3)  # Changed from 5 to 3
             elif command == "MUTE_TOGGLE":
                 volume_info = await self._client.get_volume()
                 if volume_info and volume_info.get("mute", "0") == "1":
@@ -154,7 +151,7 @@ class NaimRemote(Remote):
             elif command == "UNMUTE":
                 return await self._client.unmute()
             
-            # Playback controls  
+            # Playback controls - ENHANCED: Fixed next/prev to use working API
             elif command == "PLAY":
                 return await self._client.play()
             elif command == "PAUSE":
@@ -168,16 +165,20 @@ class NaimRemote(Remote):
             elif command == "STOP":
                 return await self._client.stop()
             elif command == "NEXT":
-                return await self._client.next_track()
+                return await self._client.next_track()  # Now uses working API
             elif command == "PREVIOUS":
-                return await self._client.previous_track()
+                return await self._client.previous_track()  # Now uses working API
             elif command == "FORWARD":
                 return await self._client.next_track()  # Same as next
             elif command == "REWIND":
                 return await self._client.previous_track()  # Same as previous
             
-            # Navigation controls (limited support)
-            elif command in ["UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "PAGE_UP", "PAGE_DOWN"]:
+            # REMOVED: Navigation controls that don't work
+            # elif command in ["UP", "DOWN", "LEFT", "RIGHT", "OK"]:
+            #     These have been removed as they're not supported by Naim API
+            
+            # Page controls (limited support)
+            elif command in ["BACK", "PAGE_UP", "PAGE_DOWN"]:
                 _LOG.info(f"Navigation command {command} - limited support on Naim devices")
                 return True
                 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Naim audio integration driver for Unfolded Circle Remote.
+Naim audio integration driver for Unfolded Circle Remote
 
 :copyright: (c) 2025 by Meir Miyara.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
@@ -13,7 +13,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 import ucapi
-from ucapi import DeviceStates, Events, IntegrationSetupError, SetupComplete, SetupError
+from ucapi import DeviceStates, Events, IntegrationSetupError, SetupComplete, SetupError, RequestUserInput, UserDataResponse
 
 from uc_intg_naim.config import Configuration, NaimDeviceConfig
 from uc_intg_naim.client import NaimClient
@@ -40,6 +40,9 @@ remotes: Dict[str, NaimRemote] = {}
 
 entities_ready = False
 initialization_lock = asyncio.Lock()
+
+# Multi-device setup state
+setup_state = {"step": "initial", "device_count": 1, "devices_data": []}
 
 
 async def _initialize_integration():
@@ -85,9 +88,12 @@ async def _initialize_integration():
                 else:
                     _LOG.warning("Could not get system info, but connection successful")
                     
-                # Create entities
-                media_player = NaimMediaPlayer(device_config)
-                remote = NaimRemote(device_config)
+                # Create entities with unique IDs for multi-device support
+                media_player_id = f"naim_{device_id}"
+                remote_id = f"naim_remote_{device_id}"
+                
+                media_player = NaimMediaPlayer(device_config, entity_id=media_player_id)
+                remote = NaimRemote(device_config, entity_id=remote_id)
                 
                 media_player._integration_api = api
                 remote._integration_api = api
@@ -99,7 +105,6 @@ async def _initialize_integration():
                     media_players[device_id] = media_player
                     remotes[device_id] = remote
                     
-                    # CRITICAL: Add entities to available_entities BEFORE setting CONNECTED
                     api.available_entities.add(media_player)
                     api.available_entities.add(remote)
                     
@@ -125,73 +130,204 @@ async def _initialize_integration():
 
 
 async def setup_handler(msg: ucapi.SetupDriver) -> ucapi.SetupAction:
-    """Handle driver setup requests."""
-    global config, entities_ready
+    """Enhanced setup handler for multi-device support."""
+    global config, entities_ready, setup_state
     
     if isinstance(msg, ucapi.DriverSetupRequest):
-        host_input = msg.setup_data.get("host")
-        if not host_input:
-            _LOG.error("No host provided in setup data")
-            return SetupError(IntegrationSetupError.OTHER)
+        # Initial setup - check if single or multi-device
+        device_count = int(msg.setup_data.get("device_count", 1))
+        
+        if device_count == 1:
+            # Single device - use existing simple flow
+            return await _handle_single_device_setup(msg.setup_data)
+        else:
+            # Multi-device setup
+            setup_state = {"step": "collect_ips", "device_count": device_count, "devices_data": []}
+            return await _request_device_ips(device_count)
+    
+    elif isinstance(msg, ucapi.UserDataResponse):
+        if setup_state["step"] == "collect_ips":
+            return await _handle_device_ips_collection(msg.input_values)
+    
+    return SetupError(IntegrationSetupError.OTHER)
+
+
+async def _handle_single_device_setup(setup_data: Dict[str, Any]) -> ucapi.SetupAction:
+    """Handle single device setup (existing flow)."""
+    host_input = setup_data.get("host")
+    if not host_input:
+        _LOG.error("No host provided in setup data")
+        return SetupError(IntegrationSetupError.OTHER)
+    
+    # Parse host:port format
+    try:
+        if ':' in host_input:
+            host, port_str = host_input.split(':', 1)
+            port = int(port_str)
+        else:
+            host = host_input
+            port = 15081  # Default Naim port
+    except ValueError:
+        _LOG.error("Invalid host:port format: %s", host_input)
+        return SetupError(IntegrationSetupError.OTHER)
+        
+    _LOG.info("Testing connection to Naim device at %s:%s", host, port)
+    
+    try:
+        test_client = NaimClient(host, port)
+        if not await test_client.connect():
+            _LOG.error("Connection test failed for host: %s:%s", host, port)
+            await test_client.disconnect()
+            return SetupError(IntegrationSetupError.CONNECTION_REFUSED)
+        
+        # Try to get device info, but don't fail setup if not available
+        device_info = await test_client.get_system_info()
+        device_name = host  # fallback name
+        
+        if device_info:
+            device_name = device_info.get('hostname', f'Naim Device ({host})')
+            _LOG.info("Device info: %s", device_info.get('hostname', 'Unknown'))
+        else:
+            _LOG.warning("Could not get device information, but connection successful")
+            device_name = f"Naim Device ({host})"
+        
+        await test_client.disconnect()
+        
+        # Create device configuration
+        device_id = f"naim_{host.replace('.', '_')}_{port}"
+        
+        device_config = NaimDeviceConfig(
+            id=device_id,
+            name=device_name,
+            address=host,
+            port=port,
+            enabled=True,
+            standby_monitoring=True
+        )
+        
+        # Save configuration
+        config.add_device(device_config)
+        
+        # Initialize entities immediately after setup
+        await _initialize_integration()
+        return SetupComplete()
+        
+    except Exception as e:
+        _LOG.error("Setup error: %s", e, exc_info=True)
+        return SetupError(IntegrationSetupError.OTHER)
+
+
+async def _request_device_ips(device_count: int) -> RequestUserInput:
+    """Request IP addresses for multiple devices."""
+    settings = []
+    
+    for i in range(device_count):
+        settings.extend([
+            {
+                "id": f"device_{i}_ip",
+                "label": {"en": f"Device {i+1} IP Address"},
+                "description": {"en": f"IP address for Naim device {i+1} (e.g., 192.168.1.{100+i} or 192.168.1.{100+i}:15081)"},
+                "field": {"text": {"value": f"192.168.1.{100+i}"}}
+            },
+            {
+                "id": f"device_{i}_name", 
+                "label": {"en": f"Device {i+1} Name"},
+                "description": {"en": f"Friendly name for device {i+1}"},
+                "field": {"text": {"value": f"Naim Device {i+1}"}}
+            }
+        ])
+    
+    return RequestUserInput(
+        title={"en": f"Configure {device_count} Naim Devices"},
+        settings=settings
+    )
+
+
+async def _handle_device_ips_collection(input_values: Dict[str, Any]) -> ucapi.SetupAction:
+    """Process multiple device IPs and test connections."""
+    devices_to_test = []
+    
+    # Extract device data from input
+    device_index = 0
+    while f"device_{device_index}_ip" in input_values:
+        ip_input = input_values[f"device_{device_index}_ip"]
+        name = input_values[f"device_{device_index}_name"]
         
         # Parse host:port format
         try:
-            if ':' in host_input:
-                host, port_str = host_input.split(':', 1)
+            if ':' in ip_input:
+                host, port_str = ip_input.split(':', 1)
                 port = int(port_str)
             else:
-                host = host_input
-                port = 15081  # Default Naim port
+                host = ip_input
+                port = 15081
         except ValueError:
-            _LOG.error("Invalid host:port format: %s", host_input)
+            _LOG.error(f"Invalid IP format for device {device_index + 1}: {ip_input}")
             return SetupError(IntegrationSetupError.OTHER)
-            
-        _LOG.info("Testing connection to Naim device at %s:%s", host, port)
         
-        try:
-            test_client = NaimClient(host, port)
-            if not await test_client.connect():
-                _LOG.error("Connection test failed for host: %s:%s", host, port)
-                await test_client.disconnect()
-                return SetupError(IntegrationSetupError.CONNECTION_REFUSED)
-            
-            # Try to get device info, but don't fail setup if not available
-            device_info = await test_client.get_system_info()
-            device_name = host  # fallback name
-            
-            if device_info:
-                device_name = device_info.get('hostname', f'Naim Device ({host})')
-                _LOG.info("Device info: %s", device_info.get('hostname', 'Unknown'))
-            else:
-                _LOG.warning("Could not get device information, but connection successful")
-                device_name = f"Naim Device ({host})"
-            
-            await test_client.disconnect()
-            
-            # Create device configuration
-            device_id = f"naim_{host.replace('.', '_')}_{port}"
-            
+        devices_to_test.append({
+            "host": host,
+            "port": port, 
+            "name": name,
+            "index": device_index
+        })
+        device_index += 1
+    
+    # Test all devices concurrently
+    _LOG.info(f"Testing connections to {len(devices_to_test)} devices...")
+    test_results = await _test_multiple_devices(devices_to_test)
+    
+    # Process results and save successful configurations
+    successful_devices = 0
+    for device_data, success in zip(devices_to_test, test_results):
+        if success:
+            device_id = f"naim_{device_data['host'].replace('.', '_')}_{device_data['port']}"
             device_config = NaimDeviceConfig(
                 id=device_id,
-                name=device_name,
-                address=host,
-                port=port,
+                name=device_data['name'],
+                address=device_data['host'],
+                port=device_data['port'],
                 enabled=True,
                 standby_monitoring=True
             )
-            
-            # Save configuration
             config.add_device(device_config)
-            
-            # CRITICAL: Initialize entities immediately after setup
-            await _initialize_integration()
-            return SetupComplete()
-            
-        except Exception as e:
-            _LOG.error("Setup error: %s", e, exc_info=True)
-            return SetupError(IntegrationSetupError.OTHER)
+            successful_devices += 1
+            _LOG.info(f"✅ Device {device_data['index'] + 1} ({device_data['name']}) connection successful")
+        else:
+            _LOG.error(f"❌ Device {device_data['index'] + 1} ({device_data['name']}) connection failed")
     
+    if successful_devices == 0:
+        _LOG.error("No devices could be connected")
+        return SetupError(IntegrationSetupError.CONNECTION_REFUSED)
+    
+    # Initialize all entities
+    await _initialize_integration()
+    _LOG.info(f"Multi-device setup completed: {successful_devices}/{len(devices_to_test)} devices configured")
     return SetupComplete()
+
+
+async def _test_multiple_devices(devices: List[Dict]) -> List[bool]:
+    """Test connections to multiple devices concurrently."""
+    async def test_device(device_data):
+        try:
+            client = NaimClient(device_data['host'], device_data['port'])
+            success = await client.connect()
+            if success:
+                # Try to get device info for validation
+                device_info = await client.get_system_info()
+                if device_info:
+                    _LOG.info(f"Device {device_data['index'] + 1}: {device_info.get('hostname', 'Unknown')}")
+            await client.disconnect()
+            return success
+        except Exception as e:
+            _LOG.error(f"Device {device_data['index'] + 1} test error: {e}")
+            return False
+    
+    tasks = [test_device(device) for device in devices]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Convert exceptions to False
+    return [result if isinstance(result, bool) else False for result in results]
 
 
 async def on_subscribe_entities(entity_ids: List[str]):
