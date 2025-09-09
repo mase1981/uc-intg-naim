@@ -19,10 +19,10 @@ _LOG = logging.getLogger(__name__)
 
 
 class NaimMediaPlayer(MediaPlayer):
-    """Naim media player entity."""
+    """Naim media player entity with enhanced multi-device support."""
     
-    def __init__(self, device_config: NaimDeviceConfig):
-        """Initialize Naim media player."""
+    def __init__(self, device_config: NaimDeviceConfig, entity_id: str = None):
+        """Initialize Naim media player with optional custom entity ID for multi-device support."""
         self._device_config = device_config
         self._client = NaimClient(device_config.address, device_config.port)
         self._attr_state = ucapi.media_player.States.OFF
@@ -44,8 +44,11 @@ class NaimMediaPlayer(MediaPlayer):
         self._monitoring = False
         self._integration_api = None
         
+        # Enhanced: Support custom entity ID for multi-device
+        if entity_id is None:
+            entity_id = f"naim_{device_config.id}"
+        
         # Initialize entity with ALL media player features
-        entity_id = f"naim_{device_config.id}"
         features = [
             ucapi.media_player.Features.ON_OFF,
             ucapi.media_player.Features.TOGGLE,
@@ -86,10 +89,9 @@ class NaimMediaPlayer(MediaPlayer):
             ucapi.media_player.Attributes.SHUFFLE: self._attr_shuffle
         }
         
-        # ✅ FIXED: Remove simple_commands parameter - MediaPlayer doesn't support it
         super().__init__(
             entity_id,
-            device_config.name,
+            device_config.name,  # Each device gets its own name
             features,
             attributes,
             device_class=ucapi.media_player.DeviceClasses.STREAMING_BOX,
@@ -133,14 +135,14 @@ class NaimMediaPlayer(MediaPlayer):
                 position = params.get("media_position", 0) if params else 0
                 success = await self._client.seek(int(position))
             
-            # Volume commands
+            # Volume commands - ENHANCED: Changed step from 5 to 3
             elif cmd_id == ucapi.media_player.Commands.VOLUME:
                 volume = params.get("volume", 0) if params else 0
                 success = await self._client.set_volume(int(volume))
             elif cmd_id == ucapi.media_player.Commands.VOLUME_UP:
-                success = await self._client.volume_up()
+                success = await self._client.volume_up(step=3)  # Changed from 5 to 3
             elif cmd_id == ucapi.media_player.Commands.VOLUME_DOWN:
-                success = await self._client.volume_down()
+                success = await self._client.volume_down(step=3)  # Changed from 5 to 3
             elif cmd_id == ucapi.media_player.Commands.MUTE_TOGGLE:
                 if self._attr_muted:
                     success = await self._client.unmute()
@@ -156,7 +158,7 @@ class NaimMediaPlayer(MediaPlayer):
                 source = params.get("source", "") if params else ""
                 success = await self._client.set_source(source)
             
-            # Repeat and shuffle
+            # ENHANCED: Fixed repeat and shuffle commands using real API
             elif cmd_id == ucapi.media_player.Commands.REPEAT:
                 repeat_mode = params.get("repeat", "OFF") if params else "OFF"
                 success = await self._client.set_repeat(repeat_mode)
