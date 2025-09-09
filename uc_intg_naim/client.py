@@ -258,8 +258,8 @@ class NaimClient:
         _LOG.info("Set volume command result: %s", "SUCCESS" if success else "FAILED")
         return success
     
-    async def volume_up(self, step: int = 5) -> bool:
-        """Increase volume by step amount."""
+    async def volume_up(self, step: int = 3) -> bool:
+        """Increase volume by step amount - ENHANCED: Default step changed to 3."""
         volume_info = await self.get_volume()
         if volume_info and "volume" in volume_info:
             current_volume = int(volume_info["volume"])
@@ -267,8 +267,8 @@ class NaimClient:
             return await self.set_volume(new_volume)
         return False
     
-    async def volume_down(self, step: int = 5) -> bool:
-        """Decrease volume by step amount."""
+    async def volume_down(self, step: int = 3) -> bool:
+        """Decrease volume by step amount - ENHANCED: Default step changed to 3."""
         volume_info = await self.get_volume()
         if volume_info and "volume" in volume_info:
             current_volume = int(volume_info["volume"])
@@ -382,7 +382,7 @@ class NaimClient:
         """Get detailed information about available inputs."""
         return self._available_inputs
     
-    # Playback control methods - FIXED: Use actual Naim API endpoints from forum
+    # ENHANCED: Fixed playback control methods using actual working Naim API endpoints
     async def play(self) -> bool:
         """Start playback - FIXED: Use nowplaying API."""
         _LOG.info("Sending play command")
@@ -407,30 +407,58 @@ class NaimClient:
         _LOG.info("Stop command result: %s", "SUCCESS" if success else "FAILED")
         return success
     
+    # ENHANCED: Working next/previous track commands from API discovery
     async def next_track(self) -> bool:
-        """Skip to next track - NOT SUPPORTED by basic Naim API."""
-        _LOG.warning("Next track command - not supported by basic Naim HTTP API")
-        return False
+        """Skip to next track - FIXED: Using working API endpoint."""
+        _LOG.info("Sending next track command")
+        response = await self._request("GET", "/nowplaying?cmd=next")
+        success = response is not None
+        _LOG.info("Next track command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def previous_track(self) -> bool:
-        """Go to previous track - NOT SUPPORTED by basic Naim API."""
-        _LOG.warning("Previous track command - not supported by basic Naim HTTP API")
-        return False
+        """Go to previous track - FIXED: Using working API endpoint."""
+        _LOG.info("Sending previous track command")
+        response = await self._request("GET", "/nowplaying?cmd=prev")
+        success = response is not None
+        _LOG.info("Previous track command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def seek(self, position: int) -> bool:
         """Seek to position in seconds - NOT SUPPORTED by basic Naim API."""
         _LOG.warning("Seek command - not supported by basic Naim HTTP API")
         return False
     
+    # ENHANCED: Working repeat and shuffle commands from API discovery
     async def set_repeat(self, mode: str) -> bool:
-        """Set repeat mode - NOT SUPPORTED by basic Naim API."""
-        _LOG.warning("Set repeat - not supported by basic Naim HTTP API")
-        return False
+        """Set repeat mode - FIXED: Using working API endpoints.
+        
+        Args:
+            mode: "OFF" (0), "ONE" (1), or "ALL" (2)
+        """
+        _LOG.info("Setting repeat mode to %s", mode)
+        
+        # Map repeat modes to Naim API values
+        repeat_values = {
+            "OFF": "0",
+            "ONE": "1", 
+            "ALL": "2"
+        }
+        
+        repeat_value = repeat_values.get(mode.upper(), "0")
+        response = await self._request("PUT", f"/nowplaying?repeat={repeat_value}")
+        success = response is not None
+        _LOG.info("Set repeat command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def set_shuffle(self, enabled: bool) -> bool:
-        """Set shuffle mode - NOT SUPPORTED by basic Naim API."""
-        _LOG.warning("Set shuffle - not supported by basic Naim HTTP API")
-        return False
+        """Set shuffle mode - FIXED: Using working API endpoint."""
+        _LOG.info("Setting shuffle to %s", enabled)
+        shuffle_value = "1" if enabled else "0"
+        response = await self._request("PUT", f"/nowplaying?shuffle={shuffle_value}")
+        success = response is not None
+        _LOG.info("Set shuffle command result: %s", "SUCCESS" if success else "FAILED")
+        return success
     
     async def set_balance(self, balance: int) -> bool:
         """Set audio balance - NOT SUPPORTED by basic Naim API."""
