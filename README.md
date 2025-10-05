@@ -5,7 +5,7 @@ Control your Naim audio devices directly from your Unfolded Circle Remote 2 or R
 ![Naim Audio](https://img.shields.io/badge/Naim-Audio-blue)
 [![Discord](https://badgen.net/discord/online-members/zGVYf58)](https://discord.gg/zGVYf58)
 ![GitHub Release](https://img.shields.io/github/v/release/mase1981/uc-intg-naim)
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/mase1981/uc-intg-tnaimya/total)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/mase1981/uc-intg-naim/total)
 ![License](https://img.shields.io/badge/license-MPL--2.0-blue)
 [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg)](https://buymeacoffee.com/meirmiyara)
 [![PayPal](https://img.shields.io/badge/PayPal-donate-blue.svg)](https://paypal.me/mmiyara)
