@@ -258,8 +258,8 @@ class NaimClient:
         _LOG.info("Set volume command result: %s", "SUCCESS" if success else "FAILED")
         return success
     
-    async def volume_up(self, step: int = 3) -> bool:
-        """Increase volume by step amount - ENHANCED: Default step changed to 3."""
+    async def volume_up(self, step: int = 1) -> bool:
+        """Increase volume by step amount."""
         volume_info = await self.get_volume()
         if volume_info and "volume" in volume_info:
             current_volume = int(volume_info["volume"])
@@ -267,8 +267,8 @@ class NaimClient:
             return await self.set_volume(new_volume)
         return False
     
-    async def volume_down(self, step: int = 3) -> bool:
-        """Decrease volume by step amount - ENHANCED: Default step changed to 3."""
+    async def volume_down(self, step: int = 1) -> bool:
+        """Decrease volume by step amount."""
         volume_info = await self.get_volume()
         if volume_info and "volume" in volume_info:
             current_volume = int(volume_info["volume"])

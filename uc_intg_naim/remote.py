@@ -135,11 +135,11 @@ class NaimRemote(Remote):
                 else:
                     return await self._client.power_on()
                     
-            # Volume controls - ENHANCED: Changed step from 5 to 3
+            # Volume controls
             elif command == "VOLUME_UP":
-                return await self._client.volume_up(step=3)  # Changed from 5 to 3
+                return await self._client.volume_up(step=1)
             elif command == "VOLUME_DOWN":
-                return await self._client.volume_down(step=3)  # Changed from 5 to 3
+                return await self._client.volume_down(step=1)
             elif command == "MUTE_TOGGLE":
                 volume_info = await self._client.get_volume()
                 if volume_info and volume_info.get("mute", "0") == "1":

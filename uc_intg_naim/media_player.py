@@ -135,14 +135,14 @@ class NaimMediaPlayer(MediaPlayer):
                 position = params.get("media_position", 0) if params else 0
                 success = await self._client.seek(int(position))
             
-            # Volume commands - ENHANCED: Changed step from 5 to 3
+            # Volume commands
             elif cmd_id == ucapi.media_player.Commands.VOLUME:
                 volume = params.get("volume", 0) if params else 0
                 success = await self._client.set_volume(int(volume))
             elif cmd_id == ucapi.media_player.Commands.VOLUME_UP:
-                success = await self._client.volume_up(step=3)  # Changed from 5 to 3
+                success = await self._client.volume_up(step=1)
             elif cmd_id == ucapi.media_player.Commands.VOLUME_DOWN:
-                success = await self._client.volume_down(step=3)  # Changed from 5 to 3
+                success = await self._client.volume_down(step=1)
             elif cmd_id == ucapi.media_player.Commands.MUTE_TOGGLE:
                 if self._attr_muted:
                     success = await self._client.unmute()
