@@ -85,8 +85,8 @@ class NaimRemote(Remote):
             "BALANCE_CENTER"
         ]
 
-        # Note: Favourite commands will be added dynamically after connection
-        # when we discover the device's configured favourites
+        # Note: Favourite commands (FAVOURITE_1 through FAVOURITE_12) are handled
+        # dynamically in the command_handler based on discovered favourites
 
         features = [ucapi.remote.Features.SEND_CMD]
         attributes = {ucapi.remote.Attributes.STATE: ucapi.remote.States.ON}
@@ -266,19 +266,12 @@ class NaimRemote(Remote):
         success = await self._client.connect()
         if success:
             self._connected = True
-            _LOG.info("Remote entity connected for %s", self._device_config.name)
-
-            # Add favourite commands dynamically after discovering device capabilities
             favourites = self._client.get_cached_favourites()
             if favourites:
-                # Add up to 12 favourites as remote commands (FAVOURITE_1 through FAVOURITE_12)
-                for idx in range(1, min(len(favourites) + 1, 13)):
-                    fav_cmd = f"FAVOURITE_{idx}"
-                    if fav_cmd not in self.simple_commands:
-                        self.simple_commands.append(fav_cmd)
-
-                _LOG.info(f"Added {min(len(favourites), 12)} favourite commands to remote")
-
+                _LOG.info("Remote entity connected for %s - %d favourites available",
+                         self._device_config.name, len(favourites))
+            else:
+                _LOG.info("Remote entity connected for %s", self._device_config.name)
         return success
     
     async def disconnect(self) -> None:
