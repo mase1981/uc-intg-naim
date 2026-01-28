@@ -70,6 +70,7 @@ class NaimClient:
         self._is_connected = False
         self._available_inputs: List[Dict[str, Any]] = []
         self._device_info: Dict[str, Any] = {}
+        self._favourites: List[Dict[str, Any]] = []
         
         # Initialize api_base properly
         self.api_base = self.base_url  # Will be updated during connection if /naim prefix detected
@@ -128,7 +129,17 @@ class NaimClient:
             else:
                 _LOG.warning("Could not get inputs from device")
                 self._available_inputs = []
-            
+
+            # Discover favourites/presets
+            favourites_data = await self.get_favourites()
+            if favourites_data:
+                # Filter only available favourites
+                self._favourites = [f for f in favourites_data if f.get("available") == "1"]
+                _LOG.info(f"Discovered {len(self._favourites)} favourites")
+            else:
+                _LOG.info("No favourites found on device")
+                self._favourites = []
+
             self._is_connected = True
             return True
                 
@@ -381,6 +392,83 @@ class NaimClient:
     async def get_available_inputs_detailed(self) -> List[Dict[str, Any]]:
         """Get detailed information about available inputs."""
         return self._available_inputs
+
+    async def get_favourites(self) -> Optional[List[Dict[str, Any]]]:
+        """Get device favourites/presets from /favourites endpoint."""
+        try:
+            _LOG.debug("Retrieving favourites from device")
+            response = await self._request("GET", "/favourites")
+
+            if response:
+                # The response can be either a list directly or a dict with a "children" key
+                if isinstance(response, list):
+                    _LOG.info(f"Retrieved {len(response)} favourites")
+                    return response
+                elif isinstance(response, dict):
+                    if "children" in response:
+                        favourites = response["children"]
+                        _LOG.info(f"Retrieved {len(favourites)} favourites")
+                        return favourites
+                    else:
+                        _LOG.warning("Favourites endpoint returned dict without 'children' key")
+                        return []
+            else:
+                _LOG.info("No favourites data received from device")
+                return []
+
+        except Exception as e:
+            _LOG.error(f"Failed to get favourites: {e}")
+            return []
+
+    def get_cached_favourites(self) -> List[Dict[str, Any]]:
+        """Get cached favourites list."""
+        return self._favourites
+
+    async def play_favourite(self, favourite_id: str) -> bool:
+        """Play a favourite by its unique ID.
+
+        Args:
+            favourite_id: The unique ID from the favourite's ussi field (e.g., "3754de0b49624983ab2179ed8524e9a2")
+                         Can be provided with or without the "favourites/" prefix.
+
+        Returns:
+            True if command was successful, False otherwise.
+        """
+        try:
+            # Remove "favourites/" prefix if present
+            if favourite_id.startswith("favourites/"):
+                favourite_id = favourite_id.split("/", 1)[1]
+
+            _LOG.info(f"Playing favourite: {favourite_id}")
+            endpoint = f"/favourites/{favourite_id}?cmd=play"
+            response = await self._request("GET", endpoint)
+            success = response is not None
+            _LOG.info(f"Play favourite command result: {'SUCCESS' if success else 'FAILED'}")
+            return success
+
+        except Exception as e:
+            _LOG.error(f"Failed to play favourite {favourite_id}: {e}")
+            return False
+
+    def get_favourite_names(self) -> Dict[str, str]:
+        """Get mapping of favourite IDs to display names.
+
+        Returns:
+            Dict mapping favourite_id to name (e.g., {"3754de0b...": "Old skool"})
+        """
+        favourite_names = {}
+
+        for fav in self._favourites:
+            ussi = fav.get("ussi", "")
+            name = fav.get("name", "")
+
+            if ussi and name:
+                # Extract ID from ussi (e.g., "favourites/3754de0b..." -> "3754de0b...")
+                if "/" in ussi:
+                    fav_id = ussi.split("/", 1)[1]
+                    favourite_names[fav_id] = name
+
+        return favourite_names
     
     # ENHANCED: Fixed playback control methods using actual working Naim API endpoints
     async def play(self) -> bool:

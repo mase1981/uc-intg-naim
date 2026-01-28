@@ -84,7 +84,10 @@ class NaimRemote(Remote):
             "BALANCE_RIGHT",
             "BALANCE_CENTER"
         ]
-        
+
+        # Note: Favourite commands will be added dynamically after connection
+        # when we discover the device's configured favourites
+
         features = [ucapi.remote.Features.SEND_CMD]
         attributes = {ucapi.remote.Attributes.STATE: ucapi.remote.States.ON}
         
@@ -223,7 +226,33 @@ class NaimRemote(Remote):
                 return await self._client.set_balance(25)   # Move balance right
             elif command == "BALANCE_CENTER":
                 return await self._client.set_balance(0)    # Center balance
-                
+
+            # Favourite commands (dynamically added after connection)
+            elif command.startswith("FAVOURITE_"):
+                try:
+                    # Extract favourite number from command (e.g., "FAVOURITE_1" -> 1)
+                    fav_num = int(command.split("_")[1])
+                    favourites = self._client.get_cached_favourites()
+
+                    if 0 < fav_num <= len(favourites):
+                        fav = favourites[fav_num - 1]  # 1-indexed to 0-indexed
+                        ussi = fav.get("ussi", "")
+                        fav_name = fav.get("name", "Unknown")
+
+                        if ussi.startswith("favourites/"):
+                            fav_id = ussi.split("/", 1)[1]
+                            _LOG.info(f"Playing favourite #{fav_num}: {fav_name}")
+                            return await self._client.play_favourite(fav_id)
+                        else:
+                            _LOG.error(f"Invalid favourite ussi format: {ussi}")
+                            return False
+                    else:
+                        _LOG.error(f"Favourite #{fav_num} not found")
+                        return False
+                except (ValueError, IndexError) as e:
+                    _LOG.error(f"Invalid favourite command format: {command} - {e}")
+                    return False
+
             else:
                 _LOG.warning("Unsupported remote command: %s", command)
                 return False
@@ -238,6 +267,18 @@ class NaimRemote(Remote):
         if success:
             self._connected = True
             _LOG.info("Remote entity connected for %s", self._device_config.name)
+
+            # Add favourite commands dynamically after discovering device capabilities
+            favourites = self._client.get_cached_favourites()
+            if favourites:
+                # Add up to 12 favourites as remote commands (FAVOURITE_1 through FAVOURITE_12)
+                for idx in range(1, min(len(favourites) + 1, 13)):
+                    fav_cmd = f"FAVOURITE_{idx}"
+                    if fav_cmd not in self.simple_commands:
+                        self.simple_commands.append(fav_cmd)
+
+                _LOG.info(f"Added {min(len(favourites), 12)} favourite commands to remote")
+
         return success
     
     async def disconnect(self) -> None:

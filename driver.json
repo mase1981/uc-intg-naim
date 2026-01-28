@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_naim_driver",
-  "version": "1.0.11",
+  "version": "1.1.0",
   "min_core_api": "0.24.0",
   "name": {
     "en": "Naim Audio",
@@ -8,7 +8,7 @@
   },
   "icon": "uc:music",
   "description": {
-    "en": "Integration driver for Naim audio devices like Atom, Nova, Star, and Uniti series with comprehensive control of all inputs, volume, and playback functions. Supports multiple devices."
+    "en": "Integration driver for Naim audio devices like Atom, Nova, Star, and Uniti series with comprehensive control of all inputs, volume, playback functions, and favourites/presets. Supports multiple devices."
   },
   "port": 9090,
   "developer": {
@@ -17,7 +17,7 @@
     "url": "https://github.com/mase1981"
   },
   "home_page": "https://github.com/mase1981/uc-intg-naim",
-  "release_date": "2025-09-07",
+  "release_date": "2026-01-28",
   "setup_data_schema": {
     "title": { "en": "Naim Device Setup" },
     "description": { "en": "Configure your Naim audio devices. You can set up one or multiple devices." },

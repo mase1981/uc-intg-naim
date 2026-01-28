@@ -156,7 +156,28 @@ class NaimMediaPlayer(MediaPlayer):
             # Source selection
             elif cmd_id == ucapi.media_player.Commands.SELECT_SOURCE:
                 source = params.get("source", "") if params else ""
-                success = await self._client.set_source(source)
+
+                # Check if this is a favourite (starts with ♫)
+                if source.startswith("♫ "):
+                    fav_name = source[2:]  # Remove "♫ " prefix
+                    _LOG.info("Playing favourite: %s", fav_name)
+
+                    # Find the favourite by name
+                    favourites = self._client.get_cached_favourites()
+                    for fav in favourites:
+                        if fav.get("name") == fav_name:
+                            ussi = fav.get("ussi", "")
+                            if ussi.startswith("favourites/"):
+                                fav_id = ussi.split("/", 1)[1]
+                                success = await self._client.play_favourite(fav_id)
+                                _LOG.info("Play favourite result: %s", "SUCCESS" if success else "FAILED")
+                                break
+                    else:
+                        _LOG.warning("Favourite '%s' not found", fav_name)
+                        success = False
+                else:
+                    # Regular source selection
+                    success = await self._client.set_source(source)
             
             # ENHANCED: Fixed repeat and shuffle commands using real API
             elif cmd_id == ucapi.media_player.Commands.REPEAT:
@@ -198,10 +219,20 @@ class NaimMediaPlayer(MediaPlayer):
             # Get available sources immediately
             self._attr_source_list = await self._client.get_sources()
             _LOG.info("Connected to device, got %d sources", len(self._attr_source_list))
-            
+
+            # Add favourites to source list
+            favourites = self._client.get_cached_favourites()
+            if favourites:
+                for fav in favourites:
+                    fav_name = fav.get("name", "")
+                    if fav_name:
+                        # Prefix with "♫ " to distinguish from regular sources
+                        self._attr_source_list.append(f"♫ {fav_name}")
+                _LOG.info("Added %d favourites to source list", len(favourites))
+
             # Get initial status and update attributes
             await self.update_status()
-            
+
         return success
     
     def start_monitoring(self):
