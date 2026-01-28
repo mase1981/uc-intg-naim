@@ -308,24 +308,22 @@ class NaimClient:
         # Find the source in available inputs
         for input_info in self._available_inputs:
             ussi = input_info.get("ussi", "")
-            
+
             # Check if this input matches the requested source
-            if (ussi == f"inputs/{source}" or 
+            if (ussi == f"inputs/{source}" or
                 ussi.endswith(f"/{source}") or
                 input_info.get("name", "").lower().replace(" ", "") == source.lower()):
-                
-                # Check if source is selectable
-                if input_info.get("selectable") == "1":
-                    _LOG.info("Setting source to %s", source)
-                    endpoint = f"/inputs/{source}?cmd=select"
-                    response = await self._request("GET", endpoint)
-                    success = response is not None
-                    _LOG.info("Set source command result: %s", "SUCCESS" if success else "FAILED")
-                    return success
-                else:
-                    _LOG.warning("Source %s is not selectable", source)
-                    return False
-        
+
+                # Found the source - try to select it regardless of selectable flag
+                # The device will reject it if it's truly not available
+                selectable = input_info.get("selectable", "0")
+                _LOG.info("Setting source to %s (selectable=%s)", source, selectable)
+                endpoint = f"/inputs/{source}?cmd=select"
+                response = await self._request("GET", endpoint)
+                success = response is not None
+                _LOG.info("Set source command result: %s", "SUCCESS" if success else "FAILED")
+                return success
+
         # If not found in available inputs, try anyway with the source ID
         _LOG.info("Setting source to %s (not in discovered inputs)", source)
         endpoint = f"/inputs/{source}?cmd=select"
@@ -337,22 +335,22 @@ class NaimClient:
     async def get_sources(self) -> List[str]:
         """Get available audio sources based on device capabilities."""
         sources = []
-        
+
         for input_info in self._available_inputs:
-            # Only include selectable inputs that are not disabled
-            if (input_info.get("selectable") == "1" and 
-                input_info.get("disabled") != "1"):
-                
+            # Include all inputs that are not disabled
+            # Note: We ignore the 'selectable' flag as it's not reliable for streaming services
+            # that may be configured but not currently active
+            if input_info.get("disabled") != "1":
                 ussi = input_info.get("ussi", "")
                 if ussi.startswith("inputs/"):
                     source_id = ussi.split("/")[-1]
                     sources.append(source_id)
-        
+
         # If no sources found from device, provide reasonable defaults
         if not sources:
-            _LOG.warning("No selectable sources found, using defaults")
+            _LOG.warning("No sources found from device, using defaults")
             sources = ["radio", "bluetooth", "spotify", "dig5", "hdmi"]
-        
+
         _LOG.info(f"Available sources: {sources}")
         return sources
     
