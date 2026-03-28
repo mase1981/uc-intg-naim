@@ -1,614 +1,281 @@
 """
-Naim audio device API client.
+Naim audio device HTTP API client.
 
-:copyright: (c) 2025 by Meir Miyara.
-:license: Mozilla Public License Version 2.0, see LICENSE for more details.
+:copyright: (c) 2025-2026 by Meir Miyara.
+:license: MPL-2.0, see LICENSE for more details.
 """
 
-import asyncio
-import json
+from __future__ import annotations
+
 import logging
-from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urljoin
+from typing import Any
 
 import aiohttp
-import websockets
-from websockets.exceptions import ConnectionClosed, WebSocketException
+
+from uc_intg_naim.const import CONNECT_TIMEOUT, DEFAULT_SOURCE_NAMES
 
 _LOG = logging.getLogger(__name__)
 
 
-class NaimPlayState:
-    """Naim playback states based on transportState values."""
-    STOPPED = "0"
-    PAUSED = "1"
-    PLAYING = "2"
-    BUFFERING = "3"
-
-
-class NaimSource:
-    """Naim audio sources based on discovery results."""
-    # Analog inputs
-    ANALOG_1 = "ana1"
-    ANALOG_2 = "ana2"
-    ANALOG_3 = "ana3" 
-    ANALOG_4 = "ana4"
-    # Digital inputs
-    DIGITAL_1 = "dig1"
-    DIGITAL_2 = "dig2"
-    DIGITAL_3 = "dig3"
-    DIGITAL_4 = "dig4"
-    DIGITAL_5 = "dig5"
-    # Other inputs
-    HDMI = "hdmi"
-    BLUETOOTH = "bluetooth"
-    INTERNET_RADIO = "radio"
-    SPOTIFY = "spotify"
-    TIDAL = "tidal"
-    QOBUZ = "qobuz"
-    USB = "usb"
-    AIRPLAY = "airplay"
-    CHROMECAST = "gcast"
-    UPNP = "upnp"
-    PLAYQUEUE = "playqueue"
-    FILES = "files"
-    MULTIROOM = "multiroom"
-
-
 class NaimClient:
-    """Client for communicating with Naim audio devices."""
-    
-    def __init__(self, host: str, port: int = 15081):
-        """Initialize Naim client."""
-        self.host = host
-        self.port = port
-        self.base_url = f"http://{host}:{port}"
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
-        self._ws_task: Optional[asyncio.Task] = None
-        self._event_callbacks: List[Callable[[Dict[str, Any]], None]] = []
-        self._is_connected = False
-        self._available_inputs: List[Dict[str, Any]] = []
-        self._device_info: Dict[str, Any] = {}
-        self._favourites: List[Dict[str, Any]] = []
-        
-        # Initialize api_base properly
-        self.api_base = self.base_url  # Will be updated during connection if /naim prefix detected
-        
+
+    def __init__(self, host: str, port: int) -> None:
+        self._host = host
+        self._port = port
+        self._base_url = f"http://{host}:{port}"
+        self._api_base = self._base_url
+        self._session: aiohttp.ClientSession | None = None
+        self._device_info: dict[str, Any] = {}
+        self._available_inputs: list[dict[str, Any]] = []
+        self._favourites: list[dict[str, Any]] = []
+        self._connected = False
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return self._device_info
+
+    @property
+    def available_inputs(self) -> list[dict[str, Any]]:
+        return self._available_inputs
+
+    @property
+    def favourites(self) -> list[dict[str, Any]]:
+        return self._favourites
+
     async def connect(self) -> bool:
-        """Connect to the Naim device."""
-        try:
-            if self._session is None:
-                timeout = aiohttp.ClientTimeout(total=10)
-                self._session = aiohttp.ClientSession(timeout=timeout)
-            
-            # Test connection with root endpoint first to detect API prefix
-            root_data = await self._request("GET", "/")
-            if not root_data:
-                _LOG.error("Could not connect to Naim device root endpoint")
-                return False
-            
-            # Check if root endpoint indicates /naim prefix is needed
-            api_prefix_detected = False
-            if isinstance(root_data, dict) and "raw_response" in root_data:
-                response_text = root_data["raw_response"]
-                if "naim/index.fcgi" in response_text or "naim/" in response_text:
-                    # Device uses /naim prefix
-                    self.api_base = f"{self.base_url}/naim"
-                    api_prefix_detected = True
-                    _LOG.info("Detected Naim API prefix: /naim")
-            
-            # Test the detected API base with a known endpoint
-            if api_prefix_detected:
-                # Test with /naim prefix
-                test_endpoints = ["/nowplaying", "/system", "/inputs"]
-                for endpoint in test_endpoints:
-                    test_data = await self._request("GET", endpoint)
-                    if test_data:
-                        _LOG.info(f"Confirmed API prefix /naim working with {endpoint}")
-                        break
-                else:
-                    # If /naim prefix tests fail, fall back to no prefix
-                    _LOG.warning("API prefix /naim detected but tests failed, falling back to root")
-                    self.api_base = self.base_url
-            
-            # Get system info to determine device capabilities
-            system_info = await self._request("GET", "/system")
-            if system_info:
-                self._device_info = system_info
-                model = system_info.get("model", "Unknown")
-                hostname = system_info.get("hostname", f"Naim Device ({self.host})")
-                _LOG.info(f"Connected to Naim device: Model {model}, Name: {hostname}")
-                _LOG.info(f"Using API base: {self.api_base}")
-            
-            # Get available inputs
-            inputs_data = await self._request("GET", "/inputs")
-            if inputs_data and "children" in inputs_data:
-                self._available_inputs = inputs_data["children"]
-                _LOG.info(f"Found {len(self._available_inputs)} inputs")
-            else:
-                _LOG.warning("Could not get inputs from device")
-                self._available_inputs = []
+        if self._session is None:
+            timeout = aiohttp.ClientTimeout(total=CONNECT_TIMEOUT)
+            self._session = aiohttp.ClientSession(timeout=timeout)
 
-            # Discover favourites/presets
-            favourites_data = await self.get_favourites()
-            if favourites_data:
-                # Filter only available favourites
-                self._favourites = [f for f in favourites_data if f.get("available") == "1"]
-                _LOG.info(f"Discovered {len(self._favourites)} favourites")
-            else:
-                _LOG.info("No favourites found on device")
-                self._favourites = []
+        if not await self._detect_api_prefix():
+            return False
 
-            self._is_connected = True
-            return True
-                
-        except Exception as e:
-            _LOG.error("Failed to connect to Naim device %s:%s - %s", self.host, self.port, e)
-            
-        return False
-    
+        system_info = await self._get("/system")
+        if system_info and isinstance(system_info, dict) and "raw_response" not in system_info:
+            self._device_info = system_info
+            _LOG.info(
+                "Connected to %s (%s) at %s",
+                system_info.get("model", "Unknown"),
+                system_info.get("hostname", ""),
+                self._api_base,
+            )
+
+        inputs_data = await self._get("/inputs")
+        if inputs_data and isinstance(inputs_data, dict) and "children" in inputs_data:
+            self._available_inputs = inputs_data["children"]
+        elif inputs_data and isinstance(inputs_data, list):
+            self._available_inputs = inputs_data
+
+        fav_data = await self._get("/favourites")
+        if fav_data:
+            raw = fav_data if isinstance(fav_data, list) else fav_data.get("children", [])
+            self._favourites = [f for f in raw if f.get("available") == "1"]
+            _LOG.info("Discovered %d favourites", len(self._favourites))
+
+        self._connected = True
+        return True
+
     async def disconnect(self) -> None:
-        """Disconnect from the Naim device."""
-        self._is_connected = False
-        
-        if self._ws_task:
-            self._ws_task.cancel()
-            self._ws_task = None
-            
-        if self._websocket:
-            await self._websocket.close()
-            self._websocket = None
-            
+        self._connected = False
         if self._session:
             await self._session.close()
             self._session = None
-    
-    def add_event_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
-        """Add callback for device events."""
-        self._event_callbacks.append(callback)
-    
-    def remove_event_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
-        """Remove event callback."""
-        if callback in self._event_callbacks:
-            self._event_callbacks.remove(callback)
-    
-    async def _request(self, method: str, endpoint: str, json_data: Dict[str, Any] = None, **kwargs) -> Optional[Dict[str, Any]]:
-        """Make HTTP request to device."""
+
+    async def _detect_api_prefix(self) -> bool:
+        self._api_base = self._base_url
+        root = await self._get("/")
+        if not root:
+            return False
+
+        if isinstance(root, dict) and "raw_response" in root:
+            text = root["raw_response"]
+            if "naim" in text.lower():
+                self._api_base = f"{self._base_url}/naim"
+                test = await self._get("/system")
+                if not test or (isinstance(test, dict) and "raw_response" in test):
+                    self._api_base = self._base_url
+
+        return True
+
+    async def _get(self, endpoint: str) -> dict[str, Any] | list | None:
+        return await self._request("GET", endpoint)
+
+    async def _put(self, endpoint: str) -> dict[str, Any] | None:
+        return await self._request("PUT", endpoint)
+
+    async def _request(
+        self, method: str, endpoint: str
+    ) -> dict[str, Any] | list | None:
         if not self._session:
             return None
-            
-        url = urljoin(self.api_base, endpoint)
-        
+
+        url = f"{self._api_base}{endpoint}"
         try:
-            # Prepare request kwargs
-            request_kwargs = {
-                'headers': {
-                    'User-Agent': 'Naim-Integration/1.0',
-                    'Accept': 'application/json'
-                },
-                **kwargs
-            }
-            
-            # NOTE: Most Naim commands use URL parameters, not JSON payloads
-            if json_data is not None:
-                request_kwargs['json'] = json_data
-                request_kwargs['headers']['Content-Type'] = 'application/json'
-            
-            _LOG.debug("Making %s request to %s", method, url)
-            
-            async with self._session.request(method, url, **request_kwargs) as response:
-                if response.status == 200:
-                    if response.content_type == "application/json":
-                        result = await response.json()
-                        _LOG.debug("Response: %s", result)
-                        return result
-                    else:
-                        text = await response.text()
-                        # Check if it's a redirect response
-                        if "refresh" in text.lower() and "naim" in text.lower():
-                            _LOG.debug("Received redirect response, endpoint may not be valid")
-                            return {"raw_response": text, "status_code": response.status}
-                        return {"response": text}
-                else:
-                    response_text = await response.text()
-                    _LOG.warning("HTTP %s: %s for %s - Response: %s", response.status, response.reason, url, response_text)
-                    
-        except Exception as e:
-            _LOG.error("Request failed: %s %s - %s", method, url, e)
-            
+            async with self._session.request(
+                method,
+                url,
+                headers={"User-Agent": "Naim-Integration/2.0", "Accept": "application/json"},
+            ) as resp:
+                if resp.status == 200:
+                    if resp.content_type == "application/json":
+                        return await resp.json()
+                    text = await resp.text()
+                    if "naim" in text.lower() and "refresh" in text.lower():
+                        return {"raw_response": text}
+                    return {"response": text}
+                _LOG.warning("HTTP %s %s -> %s", method, url, resp.status)
+        except Exception as err:
+            _LOG.error("Request %s %s failed: %s", method, url, err)
         return None
-    
-    async def get_status(self) -> Optional[Dict[str, Any]]:
-        """Get current device status from /nowplaying endpoint."""
-        return await self._request("GET", "/nowplaying")
-    
-    async def get_system_info(self) -> Optional[Dict[str, Any]]:
-        """Get system information."""
-        if self._device_info:
-            return self._device_info
-        return await self._request("GET", "/system")
-    
-    async def get_power_state(self) -> Optional[bool]:
-        """Get device power state."""
-        power_info = await self._request("GET", "/power")
-        if power_info:
-            state = power_info.get("state", "").lower()
-            system = power_info.get("system", "").lower()
-            return state == "on" or system == "on"
-        return None
-    
+
+    # --- Power ---
+
+    async def get_power_state(self) -> bool | None:
+        data = await self._get("/power")
+        if not data or not isinstance(data, dict):
+            return None
+        state = data.get("state", "").lower()
+        system = data.get("system", "").lower()
+        return state == "on" or system == "on"
+
     async def power_on(self) -> bool:
-        """Power on the device - FIXED: Use URL parameters not JSON."""
-        _LOG.info("Sending power ON command")
-        response = await self._request("PUT", "/power?system=on")
-        success = response is not None
-        _LOG.info("Power ON command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
+        return await self._put("/power?system=on") is not None
+
     async def power_off(self) -> bool:
-        """Power off the device - FIXED: Use URL parameters and 'lona' value."""
-        _LOG.info("Sending power OFF command")
-        response = await self._request("PUT", "/power?system=lona")
-        success = response is not None
-        _LOG.info("Power OFF command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def get_volume(self) -> Optional[Dict[str, Any]]:
-        """Get current volume and mute state."""
-        return await self._request("GET", "/levels/room")
-    
+        return await self._put("/power?system=lona") is not None
+
+    # --- Volume ---
+
+    async def get_volume(self) -> dict[str, Any] | None:
+        data = await self._get("/levels/room")
+        if data and isinstance(data, dict) and "raw_response" not in data:
+            return data
+        return None
+
     async def set_volume(self, volume: int) -> bool:
-        """Set volume level (0-100)."""
-        if not 0 <= volume <= 100:
-            return False
-            
-        _LOG.info("Setting volume to %d", volume)
-        response = await self._request("PUT", f"/levels/room?volume={volume}")
-        success = response is not None
-        _LOG.info("Set volume command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def volume_up(self, step: int = 1) -> bool:
-        """Increase volume by step amount."""
-        volume_info = await self.get_volume()
-        if volume_info and "volume" in volume_info:
-            current_volume = int(volume_info["volume"])
-            new_volume = min(100, current_volume + step)
-            return await self.set_volume(new_volume)
+        volume = max(0, min(100, volume))
+        return await self._put(f"/levels/room?volume={volume}") is not None
+
+    async def volume_up(self) -> bool:
+        vol = await self.get_volume()
+        if vol and "volume" in vol:
+            return await self.set_volume(int(vol["volume"]) + 1)
         return False
-    
-    async def volume_down(self, step: int = 1) -> bool:
-        """Decrease volume by step amount."""
-        volume_info = await self.get_volume()
-        if volume_info and "volume" in volume_info:
-            current_volume = int(volume_info["volume"])
-            new_volume = max(0, current_volume - step)
-            return await self.set_volume(new_volume)
+
+    async def volume_down(self) -> bool:
+        vol = await self.get_volume()
+        if vol and "volume" in vol:
+            return await self.set_volume(int(vol["volume"]) - 1)
         return False
-    
+
     async def mute(self) -> bool:
-        """Mute audio - FIXED: Use mute=1 not mute=on."""
-        _LOG.info("Sending mute command")
-        response = await self._request("PUT", "/levels/room?mute=1")
-        success = response is not None
-        _LOG.info("Mute command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
+        return await self._put("/levels/room?mute=1") is not None
+
     async def unmute(self) -> bool:
-        """Unmute audio - FIXED: Use mute=0 not mute=off."""
-        _LOG.info("Sending unmute command")
-        response = await self._request("PUT", "/levels/room?mute=0")
-        success = response is not None
-        _LOG.info("Unmute command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
+        return await self._put("/levels/room?mute=0") is not None
+
+    # --- Playback ---
+
+    async def get_status(self) -> dict[str, Any] | None:
+        data = await self._get("/nowplaying")
+        if data and isinstance(data, dict) and "raw_response" not in data:
+            return data
+        return None
+
+    async def play(self) -> bool:
+        return await self._get("/nowplaying?cmd=play") is not None
+
+    async def pause(self) -> bool:
+        return await self._get("/nowplaying?cmd=pause") is not None
+
+    async def stop(self) -> bool:
+        return await self._get("/nowplaying?cmd=stop") is not None
+
+    async def next_track(self) -> bool:
+        return await self._get("/nowplaying?cmd=next") is not None
+
+    async def previous_track(self) -> bool:
+        return await self._get("/nowplaying?cmd=prev") is not None
+
+    async def set_repeat(self, mode: str) -> bool:
+        values = {"OFF": "0", "ONE": "1", "ALL": "2"}
+        val = values.get(mode.upper(), "0")
+        return await self._put(f"/nowplaying?repeat={val}") is not None
+
+    async def set_shuffle(self, enabled: bool) -> bool:
+        val = "1" if enabled else "0"
+        return await self._put(f"/nowplaying?shuffle={val}") is not None
+
+    # --- Sources ---
+
     async def set_source(self, source: str) -> bool:
-        """Select audio source using source identifier."""
-        # Find the source in available inputs
-        for input_info in self._available_inputs:
-            ussi = input_info.get("ussi", "")
+        return await self._get(f"/inputs/{source}?cmd=select") is not None
 
-            # Check if this input matches the requested source
-            if (ussi == f"inputs/{source}" or
-                ussi.endswith(f"/{source}") or
-                input_info.get("name", "").lower().replace(" ", "") == source.lower()):
-
-                # Found the source - try to select it regardless of selectable flag
-                # The device will reject it if it's truly not available
-                selectable = input_info.get("selectable", "0")
-                _LOG.info("Setting source to %s (selectable=%s)", source, selectable)
-                endpoint = f"/inputs/{source}?cmd=select"
-                response = await self._request("GET", endpoint)
-                success = response is not None
-                _LOG.info("Set source command result: %s", "SUCCESS" if success else "FAILED")
-                return success
-
-        # If not found in available inputs, try anyway with the source ID
-        _LOG.info("Setting source to %s (not in discovered inputs)", source)
-        endpoint = f"/inputs/{source}?cmd=select"
-        response = await self._request("GET", endpoint)
-        success = response is not None
-        _LOG.info("Set source command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def get_sources(self) -> List[str]:
-        """Get available audio sources based on device capabilities."""
+    def get_sources(self) -> list[str]:
         sources = []
-
-        for input_info in self._available_inputs:
-            # Include all inputs that are not disabled
-            # Note: We ignore the 'selectable' flag as it's not reliable for streaming services
-            # that may be configured but not currently active
-            if input_info.get("disabled") != "1":
-                ussi = input_info.get("ussi", "")
-                if ussi.startswith("inputs/"):
-                    source_id = ussi.split("/")[-1]
-                    sources.append(source_id)
-
-        # If no sources found from device, provide reasonable defaults
-        if not sources:
-            _LOG.warning("No sources found from device, using defaults")
-            sources = ["radio", "bluetooth", "spotify", "dig5", "hdmi"]
-
-        _LOG.info(f"Available sources: {sources}")
-        return sources
-    
-    async def get_source_names(self) -> Dict[str, str]:
-        """Get mapping of source IDs to display names."""
-        source_names = {}
-        
-        for input_info in self._available_inputs:
-            ussi = input_info.get("ussi", "")
+        for inp in self._available_inputs:
+            if inp.get("disabled") == "1":
+                continue
+            ussi = inp.get("ussi", "")
             if ussi.startswith("inputs/"):
-                source_id = ussi.split("/")[-1]
-                friendly_name = input_info.get("name", source_id)
-                source_names[source_id] = friendly_name
-        
-        # If no source names from device, return default friendly names
-        if not source_names:
-            source_names = {
-                "ana1": "Analogue 1", "ana2": "Analogue 2", "ana3": "Analogue 3", "ana4": "Analogue 4",
-                "dig1": "Digital 1", "dig2": "Digital 2", "dig3": "Digital 3", "dig4": "Digital 4", "dig5": "Digital 5",
-                "hdmi": "HDMI",
-                "bluetooth": "Bluetooth",
-                "radio": "Internet Radio", 
-                "spotify": "Spotify",
-                "tidal": "TIDAL",
-                "qobuz": "Qobuz",
-                "usb": "USB",
-                "airplay": "AirPlay",
-                "gcast": "Chromecast",
-                "upnp": "UPnP/Servers",
-                "playqueue": "Play Queue",
-                "files": "Local Files",
-                "multiroom": "Multi-room"
-            }
-        
-        return source_names
-    
-    async def get_available_inputs_detailed(self) -> List[Dict[str, Any]]:
-        """Get detailed information about available inputs."""
-        return self._available_inputs
+                sources.append(ussi.split("/")[-1])
+        if not sources:
+            sources = ["radio", "bluetooth", "spotify", "dig5", "hdmi"]
+        return sources
 
-    async def get_favourites(self) -> Optional[List[Dict[str, Any]]]:
-        """Get device favourites/presets from /favourites endpoint."""
-        try:
-            _LOG.debug("Retrieving favourites from device")
-            response = await self._request("GET", "/favourites")
+    def get_source_names(self) -> dict[str, str]:
+        names: dict[str, str] = {}
+        for inp in self._available_inputs:
+            ussi = inp.get("ussi", "")
+            if ussi.startswith("inputs/"):
+                sid = ussi.split("/")[-1]
+                names[sid] = inp.get("name", sid)
+        return names if names else dict(DEFAULT_SOURCE_NAMES)
 
-            if response:
-                # The response can be either a list directly or a dict with a "children" key
-                if isinstance(response, list):
-                    _LOG.info(f"Retrieved {len(response)} favourites")
-                    return response
-                elif isinstance(response, dict):
-                    if "children" in response:
-                        favourites = response["children"]
-                        _LOG.info(f"Retrieved {len(favourites)} favourites")
-                        return favourites
-                    else:
-                        _LOG.warning("Favourites endpoint returned dict without 'children' key")
-                        return []
-            else:
-                _LOG.info("No favourites data received from device")
-                return []
-
-        except Exception as e:
-            _LOG.error(f"Failed to get favourites: {e}")
-            return []
-
-    def get_cached_favourites(self) -> List[Dict[str, Any]]:
-        """Get cached favourites list."""
-        return self._favourites
+    # --- Favourites ---
 
     async def play_favourite(self, favourite_id: str) -> bool:
-        """Play a favourite by its unique ID.
+        if favourite_id.startswith("favourites/"):
+            favourite_id = favourite_id.split("/", 1)[1]
+        return await self._get(f"/favourites/{favourite_id}?cmd=play") is not None
 
-        Args:
-            favourite_id: The unique ID from the favourite's ussi field (e.g., "3754de0b49624983ab2179ed8524e9a2")
-                         Can be provided with or without the "favourites/" prefix.
-
-        Returns:
-            True if command was successful, False otherwise.
-        """
-        try:
-            # Remove "favourites/" prefix if present
-            if favourite_id.startswith("favourites/"):
-                favourite_id = favourite_id.split("/", 1)[1]
-
-            _LOG.info(f"Playing favourite: {favourite_id}")
-            endpoint = f"/favourites/{favourite_id}?cmd=play"
-            response = await self._request("GET", endpoint)
-            success = response is not None
-            _LOG.info(f"Play favourite command result: {'SUCCESS' if success else 'FAILED'}")
-            return success
-
-        except Exception as e:
-            _LOG.error(f"Failed to play favourite {favourite_id}: {e}")
-            return False
-
-    def get_favourite_names(self) -> Dict[str, str]:
-        """Get mapping of favourite IDs to display names.
-
-        Returns:
-            Dict mapping favourite_id to name (e.g., {"3754de0b...": "Old skool"})
-        """
-        favourite_names = {}
-
+    def get_favourite_names(self) -> dict[str, str]:
+        result: dict[str, str] = {}
         for fav in self._favourites:
             ussi = fav.get("ussi", "")
             name = fav.get("name", "")
+            if ussi and name and "/" in ussi:
+                fav_id = ussi.split("/", 1)[1]
+                result[fav_id] = name
+        return result
 
-            if ussi and name:
-                # Extract ID from ussi (e.g., "favourites/3754de0b..." -> "3754de0b...")
-                if "/" in ussi:
-                    fav_id = ussi.split("/", 1)[1]
-                    favourite_names[fav_id] = name
+    # --- Status Parsing ---
 
-        return favourite_names
-    
-    # ENHANCED: Fixed playback control methods using actual working Naim API endpoints
-    async def play(self) -> bool:
-        """Start playback - FIXED: Use nowplaying API."""
-        _LOG.info("Sending play command")
-        response = await self._request("GET", "/nowplaying?cmd=play")
-        success = response is not None
-        _LOG.info("Play command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def pause(self) -> bool:
-        """Pause playback - FIXED: Use nowplaying API."""
-        _LOG.info("Sending pause command")
-        response = await self._request("GET", "/nowplaying?cmd=pause")
-        success = response is not None
-        _LOG.info("Pause command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def stop(self) -> bool:
-        """Stop playback - FIXED: Use nowplaying API."""
-        _LOG.info("Sending stop command")
-        response = await self._request("GET", "/nowplaying?cmd=stop")
-        success = response is not None
-        _LOG.info("Stop command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    # ENHANCED: Working next/previous track commands from API discovery
-    async def next_track(self) -> bool:
-        """Skip to next track - FIXED: Using working API endpoint."""
-        _LOG.info("Sending next track command")
-        response = await self._request("GET", "/nowplaying?cmd=next")
-        success = response is not None
-        _LOG.info("Next track command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def previous_track(self) -> bool:
-        """Go to previous track - FIXED: Using working API endpoint."""
-        _LOG.info("Sending previous track command")
-        response = await self._request("GET", "/nowplaying?cmd=prev")
-        success = response is not None
-        _LOG.info("Previous track command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def seek(self, position: int) -> bool:
-        """Seek to position in seconds - NOT SUPPORTED by basic Naim API."""
-        _LOG.warning("Seek command - not supported by basic Naim HTTP API")
-        return False
-    
-    # ENHANCED: Working repeat and shuffle commands from API discovery
-    async def set_repeat(self, mode: str) -> bool:
-        """Set repeat mode - FIXED: Using working API endpoints.
-        
-        Args:
-            mode: "OFF" (0), "ONE" (1), or "ALL" (2)
-        """
-        _LOG.info("Setting repeat mode to %s", mode)
-        
-        # Map repeat modes to Naim API values
-        repeat_values = {
-            "OFF": "0",
-            "ONE": "1", 
-            "ALL": "2"
-        }
-        
-        repeat_value = repeat_values.get(mode.upper(), "0")
-        response = await self._request("PUT", f"/nowplaying?repeat={repeat_value}")
-        success = response is not None
-        _LOG.info("Set repeat command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def set_shuffle(self, enabled: bool) -> bool:
-        """Set shuffle mode - FIXED: Using working API endpoint."""
-        _LOG.info("Setting shuffle to %s", enabled)
-        shuffle_value = "1" if enabled else "0"
-        response = await self._request("PUT", f"/nowplaying?shuffle={shuffle_value}")
-        success = response is not None
-        _LOG.info("Set shuffle command result: %s", "SUCCESS" if success else "FAILED")
-        return success
-    
-    async def set_balance(self, balance: int) -> bool:
-        """Set audio balance - NOT SUPPORTED by basic Naim API."""
-        _LOG.warning("Balance control - not supported by basic Naim HTTP API")
-        return False
-    
-    def _transport_state_to_play_state(self, transport_state: str) -> str:
-        """Convert transport state to play state."""
-        state_map = {
-            "0": "stopped",
-            "1": "paused", 
-            "2": "playing",
-            "3": "buffering"
-        }
-        return state_map.get(str(transport_state), "unknown")
-    
-    def _normalize_status(self, status: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize status response to standard format."""
-        if not status:
-            return {}
-            
-        # Get transport state and convert to play state
-        transport_state = status.get("transportState", "0")
-        play_state = self._transport_state_to_play_state(transport_state)
-        
-        # Get source information
+    def parse_status(self, status: dict[str, Any]) -> dict[str, Any]:
+        transport = str(status.get("transportState", "0"))
+        state_map = {"0": "stopped", "1": "paused", "2": "playing", "3": "buffering"}
+        play_state = state_map.get(transport, "stopped")
+
         source_ussi = status.get("source", "")
-        source_id = source_ussi.split("/")[-1] if "/" in source_ussi else source_ussi
-        
-        normalized = {
+        source = source_ussi.split("/")[-1] if "/" in source_ussi else source_ussi
+
+        return {
             "state": play_state,
-            "source": source_id,
-            "source_ussi": source_ussi,
-            "position": int(status.get("transportPosition", 0)),
-            "duration": 0,  # Not typically available in Naim status
+            "source": source,
             "title": status.get("title", ""),
             "artist": status.get("artist", ""),
             "album": status.get("album", ""),
             "artwork": status.get("artwork", ""),
             "station": status.get("station", ""),
-            "live": status.get("live", "0") == "1",
-            "can_resume": status.get("canResume", "0") == "1",
-            "repeat": status.get("repeat", "0") == "1",
+            "position": int(status.get("transportPosition", 0)),
+            "repeat": status.get("repeat", "0"),
             "shuffle": status.get("shuffle", "0") == "1",
+            "codec": status.get("codec", ""),
+            "sample_rate": status.get("sampleRate", ""),
             "bit_depth": status.get("bitDepth", ""),
             "bit_rate": status.get("bitRate", ""),
-            "sample_rate": status.get("sampleRate", ""),
-            "codec": status.get("codec", ""),
-            "genre": status.get("genre", "")
-        }
-        
-        return normalized
-    
-    @property
-    def is_connected(self) -> bool:
-        """Check if client is connected."""
-        return self._is_connected
-    
-    @property
-    def device_info(self) -> Dict[str, Any]:
-        """Get cached device information."""
-        return {
-            "host": self.host,
-            "port": self.port,
-            "device_info": self._device_info,
-            "available_inputs": self._available_inputs
         }

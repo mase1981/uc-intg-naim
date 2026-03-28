@@ -1,298 +1,225 @@
 """
-Naim remote control entity implementation.
+Naim remote entity.
 
-:copyright: (c) 2025 by Meir Miyara.
-:license: Mozilla Public License Version 2.0, see LICENSE for more details.
+:copyright: (c) 2025-2026 by Meir Miyara.
+:license: MPL-2.0, see LICENSE for more details.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict
+from typing import Any
 
-import ucapi
-from ucapi import Remote
+from ucapi import StatusCodes
+from ucapi.remote import Attributes, Commands, Features, States
+from ucapi_framework import RemoteEntity
 
-from uc_intg_naim.config import NaimDeviceConfig
-from uc_intg_naim.client import NaimClient
+from uc_intg_naim.config import NaimConfig
+from uc_intg_naim.const import SOURCE_MAP
+from uc_intg_naim.device import NaimDevice
 
 _LOG = logging.getLogger(__name__)
 
+_SIMPLE_COMMANDS = [
+    "POWER_ON",
+    "POWER_OFF",
+    "POWER_TOGGLE",
+    "VOLUME_UP",
+    "VOLUME_DOWN",
+    "MUTE_TOGGLE",
+    "MUTE",
+    "UNMUTE",
+    "PLAY",
+    "PAUSE",
+    "PLAY_PAUSE",
+    "STOP",
+    "NEXT",
+    "PREVIOUS",
+] + list(SOURCE_MAP.keys())
 
-class NaimRemote(Remote):
-    """Naim remote control entity with enhanced multi-device support."""
-    
-    def __init__(self, device_config: NaimDeviceConfig, entity_id: str = None):
-        """Initialize Naim remote control with optional custom entity ID for multi-device support."""
+
+def _create_ui() -> list[dict[str, Any]]:
+    return [
+        {
+            "page_id": "playback",
+            "name": "Playback",
+            "grid": {"width": 4, "height": 6},
+            "items": [
+                {"type": "text", "text": "On", "command": {"cmd_id": "POWER_ON"},
+                 "location": {"x": 0, "y": 0}},
+                {"type": "text", "text": "Off", "command": {"cmd_id": "POWER_OFF"},
+                 "location": {"x": 1, "y": 0}},
+                {"type": "text", "text": "Mute", "command": {"cmd_id": "MUTE_TOGGLE"},
+                 "location": {"x": 2, "y": 0}},
+                {"type": "text", "text": "Vol+", "command": {"cmd_id": "VOLUME_UP"},
+                 "location": {"x": 3, "y": 0}},
+                {"type": "icon", "icon": "uc:prev", "command": {"cmd_id": "PREVIOUS"},
+                 "location": {"x": 0, "y": 1}},
+                {"type": "text", "text": "Play/Pause", "command": {"cmd_id": "PLAY_PAUSE"},
+                 "location": {"x": 1, "y": 1}, "size": {"width": 2, "height": 1}},
+                {"type": "icon", "icon": "uc:next", "command": {"cmd_id": "NEXT"},
+                 "location": {"x": 3, "y": 1}},
+                {"type": "text", "text": "Stop", "command": {"cmd_id": "STOP"},
+                 "location": {"x": 0, "y": 2}},
+                {"type": "text", "text": "Vol-", "command": {"cmd_id": "VOLUME_DOWN"},
+                 "location": {"x": 3, "y": 2}},
+            ],
+        },
+        {
+            "page_id": "sources",
+            "name": "Sources",
+            "grid": {"width": 4, "height": 6},
+            "items": [
+                {"type": "text", "text": "Radio", "command": {"cmd_id": "SOURCE_RADIO"},
+                 "location": {"x": 0, "y": 0}},
+                {"type": "text", "text": "Spotify", "command": {"cmd_id": "SOURCE_SPOTIFY"},
+                 "location": {"x": 1, "y": 0}},
+                {"type": "text", "text": "TIDAL", "command": {"cmd_id": "SOURCE_TIDAL"},
+                 "location": {"x": 2, "y": 0}},
+                {"type": "text", "text": "Qobuz", "command": {"cmd_id": "SOURCE_QOBUZ"},
+                 "location": {"x": 3, "y": 0}},
+                {"type": "text", "text": "BT", "command": {"cmd_id": "SOURCE_BLUETOOTH"},
+                 "location": {"x": 0, "y": 1}},
+                {"type": "text", "text": "AirPlay", "command": {"cmd_id": "SOURCE_AIRPLAY"},
+                 "location": {"x": 1, "y": 1}},
+                {"type": "text", "text": "Cast", "command": {"cmd_id": "SOURCE_GCAST"},
+                 "location": {"x": 2, "y": 1}},
+                {"type": "text", "text": "UPnP", "command": {"cmd_id": "SOURCE_UPNP"},
+                 "location": {"x": 3, "y": 1}},
+                {"type": "text", "text": "HDMI", "command": {"cmd_id": "SOURCE_HDMI"},
+                 "location": {"x": 0, "y": 2}},
+                {"type": "text", "text": "Dig 1", "command": {"cmd_id": "SOURCE_DIG1"},
+                 "location": {"x": 1, "y": 2}},
+                {"type": "text", "text": "Dig 2", "command": {"cmd_id": "SOURCE_DIG2"},
+                 "location": {"x": 2, "y": 2}},
+                {"type": "text", "text": "Ana 1", "command": {"cmd_id": "SOURCE_ANA1"},
+                 "location": {"x": 3, "y": 2}},
+                {"type": "text", "text": "USB", "command": {"cmd_id": "SOURCE_USB"},
+                 "location": {"x": 0, "y": 3}},
+                {"type": "text", "text": "Queue", "command": {"cmd_id": "SOURCE_PLAYQUEUE"},
+                 "location": {"x": 1, "y": 3}},
+                {"type": "text", "text": "Files", "command": {"cmd_id": "SOURCE_FILES"},
+                 "location": {"x": 2, "y": 3}},
+            ],
+        },
+    ]
+
+
+class NaimRemote(RemoteEntity):
+
+    def __init__(self, device_config: NaimConfig, device: NaimDevice) -> None:
+        self._device = device
         self._device_config = device_config
-        self._client = NaimClient(device_config.address, device_config.port)
-        self._connected = False
-        self._integration_api = None  # Will be set by driver
-        
-        # Enhanced: Support custom entity ID for multi-device
-        if entity_id is None:
-            entity_id = f"naim_remote_{device_config.id}"
-        
-        # Define remote buttons/commands - CLEANED UP: Removed unsupported navigation buttons
-        simple_commands = [
-            # Power controls
-            "POWER_ON",
-            "POWER_OFF", 
-            "POWER_TOGGLE",
-            
-            # Volume controls
-            "VOLUME_UP",
-            "VOLUME_DOWN",
-            "MUTE_TOGGLE",
-            "MUTE",
-            "UNMUTE",
-            
-            # Playback controls
-            "PLAY",
-            "PAUSE",
-            "PLAY_PAUSE",
-            "STOP",
-            "NEXT",
-            "PREVIOUS",
-            "FORWARD",
-            "REWIND",
-            
-            # REMOVED: Navigation controls that don't work with Naim API
-            # "UP", "DOWN", "LEFT", "RIGHT", "OK" - These are not supported
-            "BACK",
-            "PAGE_UP",
-            "PAGE_DOWN",
-            
-            # Source selection - all discovered inputs
-            "SOURCE_ANA1",      # Analogue 1
-            "SOURCE_DIG1",      # Digital 1
-            "SOURCE_DIG2",      # Digital 2
-            "SOURCE_DIG3",      # Digital 3
-            "SOURCE_HDMI",      # HDMI
-            "SOURCE_RADIO",     # Internet Radio
-            "SOURCE_BLUETOOTH", # Bluetooth
-            "SOURCE_SPOTIFY",   # Spotify
-            "SOURCE_TIDAL",     # TIDAL
-            "SOURCE_QOBUZ",     # Qobuz
-            "SOURCE_USB",       # USB
-            "SOURCE_AIRPLAY",   # Airplay
-            "SOURCE_GCAST",     # Chromecast
-            "SOURCE_UPNP",      # Servers/UPnP
-            "SOURCE_PLAYQUEUE", # Playqueue
-            "SOURCE_FILES",     # Demo Files
-            
-            # Audio controls
-            "BALANCE_LEFT",
-            "BALANCE_RIGHT",
-            "BALANCE_CENTER"
-        ]
 
-        # Note: Favourite commands (FAVOURITE_1 through FAVOURITE_12) are handled
-        # dynamically in the command_handler based on discovered favourites
+        fav_commands = []
+        for i, fav in enumerate(device_config.favourites, 1):
+            fav_commands.append(f"FAVOURITE_{i}")
 
-        features = [ucapi.remote.Features.SEND_CMD]
-        attributes = {ucapi.remote.Attributes.STATE: ucapi.remote.States.ON}
-        
+        all_commands = _SIMPLE_COMMANDS + fav_commands
+
+        attributes = {Attributes.STATE: States.OFF}
+
         super().__init__(
-            entity_id,
-            f"{device_config.name} Remote",  # Each device gets its own name
-            features,
+            f"remote.{device_config.identifier}",
+            f"{device_config.name} Remote",
+            [Features.ON_OFF, Features.SEND_CMD],
             attributes,
-            simple_commands=simple_commands,
-            cmd_handler=self.command_handler
+            simple_commands=all_commands,
+            ui_pages=_create_ui(),
+            cmd_handler=self._handle_command,
         )
-    
-    async def command_handler(self, entity, cmd_id: str, params: Dict[str, Any] = None) -> ucapi.StatusCodes:
-        """Handle remote control commands."""
-        _LOG.info("Remote command: %s, params: %s", cmd_id, params)
-        
+        self.subscribe_to_device(device)
+
+    async def sync_state(self) -> None:
+        state = States.ON if self._device.power else States.OFF
+        self.update({Attributes.STATE: state})
+
+    async def _handle_command(
+        self, entity: RemoteEntity, cmd_id: str, params: dict[str, Any] | None = None
+    ) -> StatusCodes:
+        params = params or {}
+
+        if cmd_id == Commands.ON:
+            await self._device.turn_on()
+            return StatusCodes.OK
+        if cmd_id == Commands.OFF:
+            await self._device.turn_off()
+            return StatusCodes.OK
+
+        if cmd_id == Commands.SEND_CMD:
+            command = params.get("command", "")
+            if not command:
+                return StatusCodes.BAD_REQUEST
+            return await self._dispatch(command)
+
+        return StatusCodes.NOT_IMPLEMENTED
+
+    async def _dispatch(self, command: str) -> StatusCodes:
+        dev = self._device
         try:
-            # Handle send_cmd commands
-            if cmd_id == ucapi.remote.Commands.SEND_CMD:
-                if not params or "command" not in params:
-                    _LOG.warning("SEND_CMD missing command parameter")
-                    return ucapi.StatusCodes.BAD_REQUEST
-                
-                command = params["command"]
-                success = await self._handle_simple_command(command)
-                return ucapi.StatusCodes.OK if success else ucapi.StatusCodes.SERVER_ERROR
-            
-            # Handle direct simple commands (for backwards compatibility)
-            success = await self._handle_simple_command(cmd_id)
-            return ucapi.StatusCodes.OK if success else ucapi.StatusCodes.SERVER_ERROR
-            
-        except Exception as e:
-            _LOG.error("Remote command %s failed: %s", cmd_id, e)
-            return ucapi.StatusCodes.SERVER_ERROR
-    
-    async def _handle_simple_command(self, command: str) -> bool:
-        """Handle simple remote commands."""
-        try:
-            # Power controls
             if command == "POWER_ON":
-                return await self._client.power_on()
+                await dev.turn_on()
             elif command == "POWER_OFF":
-                return await self._client.power_off()
+                await dev.turn_off()
             elif command == "POWER_TOGGLE":
-                power_state = await self._client.get_power_state()
-                if power_state:
-                    return await self._client.power_off()
+                if dev.power:
+                    await dev.turn_off()
                 else:
-                    return await self._client.power_on()
-                    
-            # Volume controls
+                    await dev.turn_on()
             elif command == "VOLUME_UP":
-                return await self._client.volume_up(step=1)
+                await dev.cmd_volume_up()
             elif command == "VOLUME_DOWN":
-                return await self._client.volume_down(step=1)
+                await dev.cmd_volume_down()
             elif command == "MUTE_TOGGLE":
-                volume_info = await self._client.get_volume()
-                if volume_info and volume_info.get("mute", "0") == "1":
-                    return await self._client.unmute()
+                if dev.muted:
+                    await dev.cmd_unmute()
                 else:
-                    return await self._client.mute()
+                    await dev.cmd_mute()
             elif command == "MUTE":
-                return await self._client.mute()
+                await dev.cmd_mute()
             elif command == "UNMUTE":
-                return await self._client.unmute()
-            
-            # Playback controls - ENHANCED: Fixed next/prev to use working API
+                await dev.cmd_unmute()
             elif command == "PLAY":
-                return await self._client.play()
+                await dev.cmd_play()
             elif command == "PAUSE":
-                return await self._client.pause()
+                await dev.cmd_pause()
             elif command == "PLAY_PAUSE":
-                status = await self._client.get_status()
-                if status and status.get("transportState") == "2":  # playing
-                    return await self._client.pause()
+                if dev.play_state == "playing":
+                    await dev.cmd_pause()
                 else:
-                    return await self._client.play()
+                    await dev.cmd_play()
             elif command == "STOP":
-                return await self._client.stop()
+                await dev.cmd_stop()
             elif command == "NEXT":
-                return await self._client.next_track()  # Now uses working API
+                await dev.cmd_next()
             elif command == "PREVIOUS":
-                return await self._client.previous_track()  # Now uses working API
-            elif command == "FORWARD":
-                return await self._client.next_track()  # Same as next
-            elif command == "REWIND":
-                return await self._client.previous_track()  # Same as previous
-            
-            # REMOVED: Navigation controls that don't work
-            # elif command in ["UP", "DOWN", "LEFT", "RIGHT", "OK"]:
-            #     These have been removed as they're not supported by Naim API
-            
-            # Page controls (limited support)
-            elif command in ["BACK", "PAGE_UP", "PAGE_DOWN"]:
-                _LOG.info(f"Navigation command {command} - limited support on Naim devices")
-                return True
-                
-            # Source selection - all discovered inputs
-            elif command == "SOURCE_ANA1":
-                return await self._client.set_source("ana1")
-            elif command == "SOURCE_DIG1":
-                return await self._client.set_source("dig1")
-            elif command == "SOURCE_DIG2":
-                return await self._client.set_source("dig2")
-            elif command == "SOURCE_DIG3":
-                return await self._client.set_source("dig3")
-            elif command == "SOURCE_HDMI":
-                return await self._client.set_source("hdmi")
-            elif command == "SOURCE_RADIO":
-                return await self._client.set_source("radio")
-            elif command == "SOURCE_BLUETOOTH":
-                return await self._client.set_source("bluetooth")
-            elif command == "SOURCE_SPOTIFY":
-                return await self._client.set_source("spotify")
-            elif command == "SOURCE_TIDAL":
-                return await self._client.set_source("tidal")
-            elif command == "SOURCE_QOBUZ":
-                return await self._client.set_source("qobuz")
-            elif command == "SOURCE_USB":
-                return await self._client.set_source("usb")
-            elif command == "SOURCE_AIRPLAY":
-                return await self._client.set_source("airplay")
-            elif command == "SOURCE_GCAST":
-                return await self._client.set_source("gcast")
-            elif command == "SOURCE_UPNP":
-                return await self._client.set_source("upnp")
-            elif command == "SOURCE_PLAYQUEUE":
-                return await self._client.set_source("playqueue")
-            elif command == "SOURCE_FILES":
-                return await self._client.set_source("files")
-            
-            # Audio controls
-            elif command == "BALANCE_LEFT":
-                return await self._client.set_balance(-25)  # Move balance left
-            elif command == "BALANCE_RIGHT":
-                return await self._client.set_balance(25)   # Move balance right
-            elif command == "BALANCE_CENTER":
-                return await self._client.set_balance(0)    # Center balance
-
-            # Favourite commands (dynamically added after connection)
+                await dev.cmd_previous()
+            elif command in SOURCE_MAP:
+                await dev.cmd_select_source(SOURCE_MAP[command])
             elif command.startswith("FAVOURITE_"):
-                try:
-                    # Extract favourite number from command (e.g., "FAVOURITE_1" -> 1)
-                    fav_num = int(command.split("_")[1])
-                    favourites = self._client.get_cached_favourites()
-
-                    if 0 < fav_num <= len(favourites):
-                        fav = favourites[fav_num - 1]  # 1-indexed to 0-indexed
-                        ussi = fav.get("ussi", "")
-                        fav_name = fav.get("name", "Unknown")
-
-                        if ussi.startswith("favourites/"):
-                            fav_id = ussi.split("/", 1)[1]
-                            _LOG.info(f"Playing favourite #{fav_num}: {fav_name}")
-                            return await self._client.play_favourite(fav_id)
-                        else:
-                            _LOG.error(f"Invalid favourite ussi format: {ussi}")
-                            return False
-                    else:
-                        _LOG.error(f"Favourite #{fav_num} not found")
-                        return False
-                except (ValueError, IndexError) as e:
-                    _LOG.error(f"Invalid favourite command format: {command} - {e}")
-                    return False
-
+                return await self._play_favourite(command)
             else:
-                _LOG.warning("Unsupported remote command: %s", command)
-                return False
-                
-        except Exception as e:
-            _LOG.error("Error executing command %s: %s", command, e)
-            return False
-    
-    async def connect(self) -> bool:
-        """Connect to Naim device."""
-        success = await self._client.connect()
-        if success:
-            self._connected = True
-            favourites = self._client.get_cached_favourites()
-            if favourites:
-                _LOG.info("Remote entity connected for %s - %d favourites available",
-                         self._device_config.name, len(favourites))
-            else:
-                _LOG.info("Remote entity connected for %s", self._device_config.name)
-        return success
-    
-    async def disconnect(self) -> None:
-        """Disconnect from Naim device."""
-        self._connected = False
-        await self._client.disconnect()
-    
-    async def update_attributes(self):
-        """Update remote attributes - WiiM pattern."""
-        self.attributes[ucapi.remote.Attributes.STATE] = ucapi.remote.States.ON
-        
-        if self._integration_api and hasattr(self._integration_api, 'configured_entities'):
-            try:
-                self._integration_api.configured_entities.update_attributes(
-                    self.id, {ucapi.remote.Attributes.STATE: ucapi.remote.States.ON}
-                )
-                _LOG.debug("Forced integration API update for remote %s", self.id)
-            except Exception as e:
-                _LOG.debug("Could not force remote integration API update: %s", e)
-    
-    @property
-    def is_connected(self) -> bool:
-        """Check if device is connected."""
-        return self._connected and self._client.is_connected
+                _LOG.warning("Unknown remote command: %s", command)
+                return StatusCodes.NOT_IMPLEMENTED
+
+            return StatusCodes.OK
+
+        except Exception as err:
+            _LOG.error("Remote command %s failed: %s", command, err)
+            return StatusCodes.SERVER_ERROR
+
+    async def _play_favourite(self, command: str) -> StatusCodes:
+        try:
+            fav_num = int(command.split("_")[1])
+            favs = self._device_config.favourites
+            if 0 < fav_num <= len(favs):
+                fav = favs[fav_num - 1]
+                ussi = fav.get("ussi", "")
+                fav_id = ussi.split("/", 1)[1] if "/" in ussi else ussi
+                await self._device.cmd_play_favourite(fav_id)
+                return StatusCodes.OK
+            _LOG.warning("Favourite #%d not found", fav_num)
+            return StatusCodes.BAD_REQUEST
+        except (ValueError, IndexError) as err:
+            _LOG.error("Invalid favourite command %s: %s", command, err)
+            return StatusCodes.BAD_REQUEST
