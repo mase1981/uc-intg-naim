@@ -61,8 +61,7 @@ async def main() -> None:
 
     configs = list(config_manager.all())
     if configs:
-        _LOG.info("Connecting %d configured device(s)...", len(configs))
-        await driver.connect_devices()
+        _LOG.info("Found %d configured device(s)", len(configs))
     else:
         _LOG.info("No configured devices - waiting for setup")
 
