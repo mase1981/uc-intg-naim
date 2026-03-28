@@ -18,6 +18,7 @@ from uc_intg_naim.config import NaimConfig
 from uc_intg_naim.const import (
     CONNECT_RETRIES,
     CONNECT_RETRY_DELAY,
+    MAX_POLL_FAILURES,
     POLL_INTERVAL,
     RECONNECT_DELAY,
     WATCHDOG_INTERVAL,
@@ -39,6 +40,7 @@ class NaimDevice(ExternalClientDevice):
         )
         self._client = NaimClient(device_config.host, device_config.port)
         self._poll_task: asyncio.Task | None = None
+        self._consecutive_failures: int = 0
         self._power: bool | None = None
         self._volume: int = 0
         self._muted: bool = False
@@ -170,6 +172,7 @@ class NaimDevice(ExternalClientDevice):
                 self._favourites = self._client.get_favourite_names()
 
                 await self._poll_state()
+                self._consecutive_failures = 0
                 self._start_polling()
                 _LOG.info("[%s] Connected, %d sources, %d favourites",
                           self.log_id, len(self._sources), len(self._favourites))
@@ -205,17 +208,27 @@ class NaimDevice(ExternalClientDevice):
             try:
                 await asyncio.sleep(POLL_INTERVAL)
                 await self._poll_state()
+                self._consecutive_failures = 0
             except asyncio.CancelledError:
                 break
             except Exception as err:
-                _LOG.error("[%s] Poll error: %s", self.log_id, err)
+                self._consecutive_failures += 1
+                _LOG.error("[%s] Poll error (%d/%d): %s",
+                           self.log_id, self._consecutive_failures, MAX_POLL_FAILURES, err)
+                if self._consecutive_failures >= MAX_POLL_FAILURES:
+                    _LOG.warning("[%s] Too many poll failures, triggering reconnect", self.log_id)
+                    self._client._connected = False
+                    self.events.emit(DeviceEvents.DISCONNECTED, self.identifier)
+                    break
                 await asyncio.sleep(POLL_INTERVAL)
 
     async def _poll_state(self) -> None:
         changed = False
 
         power = await self._client.get_power_state()
-        if power is not None and power != self._power:
+        if power is None:
+            raise ConnectionError(f"Cannot reach {self._device_config.host}")
+        if power != self._power:
             self._power = power
             changed = True
 

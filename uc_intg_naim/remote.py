@@ -15,7 +15,7 @@ from ucapi.remote import Attributes, Commands, Features, States
 from ucapi_framework import RemoteEntity
 
 from uc_intg_naim.config import NaimConfig
-from uc_intg_naim.const import SOURCE_MAP
+from uc_intg_naim.const import MAX_FAVOURITE_COMMANDS, SOURCE_MAP
 from uc_intg_naim.device import NaimDevice
 
 _LOG = logging.getLogger(__name__)
@@ -111,7 +111,8 @@ class NaimRemote(RemoteEntity):
         self._device = device
         self._device_config = device_config
 
-        fav_commands = [f"FAVOURITE_{i}" for i in range(1, len(device_config.favourites) + 1)]
+        num_favs = min(len(device_config.favourites), MAX_FAVOURITE_COMMANDS)
+        fav_commands = [f"FAVOURITE_{i}" for i in range(1, num_favs + 1)]
 
         all_commands = _SIMPLE_COMMANDS + fav_commands
 

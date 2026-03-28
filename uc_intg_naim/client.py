@@ -12,7 +12,7 @@ from typing import Any
 
 import aiohttp
 
-from uc_intg_naim.const import CONNECT_TIMEOUT, DEFAULT_SOURCE_NAMES
+from uc_intg_naim.const import CONNECT_TIMEOUT, DEFAULT_SOURCE_NAMES, REQUEST_TIMEOUT
 
 _LOG = logging.getLogger(__name__)
 
@@ -115,12 +115,15 @@ class NaimClient:
 
         url = f"{self._api_base}{endpoint}"
         try:
+            req_timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
             async with self._session.request(
                 method,
                 url,
                 headers={"User-Agent": "Naim-Integration/2.0", "Accept": "application/json"},
+                timeout=req_timeout,
             ) as resp:
                 if resp.status == 200:
+                    self._connected = True
                     if resp.content_type == "application/json":
                         return await resp.json()
                     text = await resp.text()
@@ -129,6 +132,7 @@ class NaimClient:
                     return {"response": text}
                 _LOG.warning("HTTP %s %s -> %s", method, url, resp.status)
         except Exception as err:
+            self._connected = False
             _LOG.error("Request %s %s failed: %s", method, url, err)
         return None
 
