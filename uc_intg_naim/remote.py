@@ -111,9 +111,8 @@ class NaimRemote(RemoteEntity):
         self._device = device
         self._device_config = device_config
 
-        fav_commands = []
-        for i, fav in enumerate(device_config.favourites, 1):
-            fav_commands.append(f"FAVOURITE_{i}")
+        max_favs = min(len(device_config.favourites), 20)
+        fav_commands = [f"FAVOURITE_{i}" for i in range(1, max_favs + 1)]
 
         all_commands = _SIMPLE_COMMANDS + fav_commands
 
