@@ -57,12 +57,14 @@ async def main() -> None:
 
     await driver.api.init(driver_json_path, setup_handler)
 
-    driver.register_all_device_instances(connect=False)
+    await driver.register_all_configured_devices(connect=False)
 
-    if config_manager.has_devices():
-        driver.set_device_state(driver.api.DriverDeviceState.CONNECTED)
+    configs = list(config_manager.all())
+    if configs:
+        _LOG.info("Connecting %d configured device(s)...", len(configs))
+        await driver.connect_devices()
     else:
-        driver.set_device_state(driver.api.DriverDeviceState.DISCONNECTED)
+        _LOG.info("No configured devices - waiting for setup")
 
     _LOG.info("Naim integration v%s started", __version__)
     await asyncio.Future()
