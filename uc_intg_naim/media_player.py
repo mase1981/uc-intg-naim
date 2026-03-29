@@ -11,9 +11,11 @@ import logging
 from typing import Any
 
 from ucapi import StatusCodes
+from ucapi.api_definitions import BrowseOptions, BrowseResults
 from ucapi.media_player import Attributes, Commands, DeviceClasses, Features, States, RepeatMode
 from ucapi_framework import MediaPlayerEntity
 
+from uc_intg_naim import browser
 from uc_intg_naim.config import NaimConfig
 from uc_intg_naim.device import NaimDevice
 
@@ -40,6 +42,7 @@ _FEATURES = [
     Features.MEDIA_IMAGE_URL,
     Features.MEDIA_POSITION,
     Features.MEDIA_DURATION,
+    Features.BROWSE_MEDIA,
 ]
 
 
@@ -105,6 +108,9 @@ class NaimMediaPlayer(MediaPlayerEntity):
             Attributes.SHUFFLE: dev.shuffle_mode,
         })
 
+    async def browse(self, options: BrowseOptions) -> BrowseResults | StatusCodes:
+        return await browser.browse(self._device, self._device_config, options)
+
     async def _handle_command(
         self, entity: MediaPlayerEntity, cmd_id: str, params: dict[str, Any] | None = None
     ) -> StatusCodes:
@@ -159,6 +165,13 @@ class NaimMediaPlayer(MediaPlayerEntity):
                             break
                 else:
                     await dev.cmd_select_source(source)
+            elif cmd_id == Commands.PLAY_MEDIA:
+                media_type = params.get("media_type", "")
+                media_id = params.get("media_id", "")
+                if media_type == "favourite" and media_id:
+                    await dev.cmd_play_favourite(media_id)
+                elif media_type == "source" and media_id:
+                    await dev.cmd_select_source(media_id)
             elif cmd_id == Commands.REPEAT:
                 await dev.cmd_repeat(params.get("repeat", "OFF"))
             elif cmd_id == Commands.SHUFFLE:
