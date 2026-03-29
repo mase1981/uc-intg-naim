@@ -27,11 +27,6 @@ class NaimSourceSelect(SelectEntity):
         self._device_config = device_config
 
         source_names = device.source_names or {}
-        options = []
-        for src in device_config.sources:
-            display = source_names.get(src, src)
-            options.append(display)
-
         self._source_to_display = {
             src: source_names.get(src, src) for src in device_config.sources
         }
@@ -39,7 +34,7 @@ class NaimSourceSelect(SelectEntity):
 
         attributes = {
             Attributes.STATE: States.UNKNOWN,
-            Attributes.OPTIONS: options,
+            Attributes.OPTIONS: [],
             Attributes.CURRENT_OPTION: "",
         }
 

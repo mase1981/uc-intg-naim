@@ -49,26 +49,9 @@ class NaimMediaPlayer(MediaPlayerEntity):
         self._device = device
         self._device_config = device_config
 
-        source_list = list(device_config.sources) if device_config.sources else []
-        for fav in device_config.favourites:
-            fname = fav.get("name", "")
-            if fname:
-                source_list.append(f"♫ {fname}")
-
         attributes = {
-            Attributes.STATE: States.OFF,
-            Attributes.VOLUME: 0,
-            Attributes.MUTED: False,
-            Attributes.SOURCE: "",
-            Attributes.SOURCE_LIST: source_list,
-            Attributes.MEDIA_TITLE: "",
-            Attributes.MEDIA_ARTIST: "",
-            Attributes.MEDIA_ALBUM: "",
-            Attributes.MEDIA_IMAGE_URL: "",
-            Attributes.MEDIA_POSITION: 0,
-            Attributes.MEDIA_DURATION: 0,
-            Attributes.REPEAT: RepeatMode.OFF,
-            Attributes.SHUFFLE: False,
+            Attributes.STATE: States.STANDBY,
+            Attributes.SOURCE_LIST: [],
         }
 
         super().__init__(
