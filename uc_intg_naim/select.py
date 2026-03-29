@@ -54,8 +54,10 @@ class NaimSourceSelect(SelectEntity):
     async def sync_state(self) -> None:
         dev = self._device
         current = self._source_to_display.get(dev.source, dev.source)
+        options = list(self._source_to_display.values())
         self.update({
             Attributes.STATE: States.ON if dev.power else States.UNKNOWN,
+            Attributes.OPTIONS: options,
             Attributes.CURRENT_OPTION: current,
         })
 

@@ -100,11 +100,18 @@ class NaimMediaPlayer(MediaPlayerEntity):
         elif dev.repeat_mode == "2":
             repeat = RepeatMode.ALL
 
+        source_list = list(self._device_config.sources) if self._device_config.sources else []
+        for fav in self._device_config.favourites:
+            fname = fav.get("name", "")
+            if fname:
+                source_list.append(f"♫ {fname}")
+
         self.update({
             Attributes.STATE: state,
             Attributes.VOLUME: dev.volume,
             Attributes.MUTED: dev.muted,
             Attributes.SOURCE: dev.source,
+            Attributes.SOURCE_LIST: source_list,
             Attributes.MEDIA_TITLE: dev.media_title,
             Attributes.MEDIA_ARTIST: dev.media_artist,
             Attributes.MEDIA_ALBUM: dev.media_album,
