@@ -57,7 +57,6 @@ def _browse_root(config: NaimConfig) -> BrowseResults:
             media_id="favourites",
             can_browse=True,
             can_play=False,
-            image_url="",
         ),
         BrowseMediaItem(
             title="Sources",
@@ -66,7 +65,6 @@ def _browse_root(config: NaimConfig) -> BrowseResults:
             media_id="sources",
             can_browse=True,
             can_play=False,
-            image_url="",
         ),
     ]
 
@@ -102,7 +100,6 @@ def _browse_favourites(config: NaimConfig, page: int) -> BrowseResults:
             media_id=fav_id,
             can_play=True,
             can_browse=False,
-            image_url="",
         ))
 
     return BrowseResults(
@@ -130,7 +127,6 @@ def _browse_sources(device: NaimDevice, config: NaimConfig) -> BrowseResults:
             media_id=src,
             can_play=True,
             can_browse=False,
-            image_url="",
         ))
 
     return BrowseResults(

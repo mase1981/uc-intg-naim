@@ -217,7 +217,7 @@ class NaimClient:
     # --- Sources ---
 
     async def set_source(self, source: str) -> bool:
-        return await self._get(f"/inputs/{source}?cmd=select") is not None
+        return await self._put(f"/inputs/{source}?cmd=select") is not None
 
     def get_sources(self) -> list[str]:
         sources = []
