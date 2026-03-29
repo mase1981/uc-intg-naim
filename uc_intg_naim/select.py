@@ -48,6 +48,12 @@ class NaimSourceSelect(SelectEntity):
 
     async def sync_state(self) -> None:
         dev = self._device
+        source_names = dev.source_names or {}
+        if source_names:
+            self._source_to_display = {
+                src: source_names.get(src, src) for src in self._device_config.sources
+            }
+            self._display_to_source = {v: k for k, v in self._source_to_display.items()}
         current = self._source_to_display.get(dev.source, dev.source)
         options = list(self._source_to_display.values())
         self.update({

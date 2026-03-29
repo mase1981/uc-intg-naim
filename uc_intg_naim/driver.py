@@ -37,5 +37,5 @@ class NaimDriver(BaseIntegrationDriver[NaimDevice, NaimConfig]):
                 ],
             ],
             driver_id="naim",
-            require_connection_before_registry=True,
+            require_connection_before_registry=False,
         )
