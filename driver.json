@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_naim_driver",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "min_core_api": "0.22.0",
   "name": {
     "en": "Naim Audio"
@@ -15,7 +15,7 @@
     "url": "https://github.com/mase1981"
   },
   "home_page": "https://github.com/mase1981/uc-intg-naim",
-  "release_date": "2026-03-28",
+  "release_date": "2026-05-30",
   "setup_data_schema": {
     "title": {
       "en": "Naim Audio Setup"

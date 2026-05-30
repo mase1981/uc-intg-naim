@@ -11,8 +11,10 @@ import logging
 from typing import Any
 
 from ucapi import StatusCodes
-from ucapi.api_definitions import BrowseOptions, BrowseResults
-from ucapi.media_player import Attributes, Commands, DeviceClasses, Features, States, RepeatMode
+from ucapi.media_player import (
+    Attributes, Commands, DeviceClasses, Features, States, RepeatMode,
+    BrowseOptions, BrowseResults,
+)
 from ucapi_framework import MediaPlayerEntity
 
 from uc_intg_naim import browser
@@ -42,7 +44,9 @@ _FEATURES = [
     Features.MEDIA_IMAGE_URL,
     Features.MEDIA_POSITION,
     Features.MEDIA_DURATION,
+    Features.MEDIA_TYPE,
     Features.BROWSE_MEDIA,
+    Features.PLAY_MEDIA,
 ]
 
 
@@ -53,8 +57,12 @@ class NaimMediaPlayer(MediaPlayerEntity):
         self._device_config = device_config
 
         attributes = {
-            Attributes.STATE: States.STANDBY,
+            Attributes.STATE: States.UNKNOWN,
+            Attributes.VOLUME: 0,
+            Attributes.MUTED: False,
+            Attributes.SOURCE: "",
             Attributes.SOURCE_LIST: [],
+            Attributes.MEDIA_TYPE: "music",
         }
 
         super().__init__(
@@ -69,6 +77,10 @@ class NaimMediaPlayer(MediaPlayerEntity):
 
     async def sync_state(self) -> None:
         dev = self._device
+        if dev.state == "UNAVAILABLE":
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+
         if dev.power is None or not dev.power:
             state = States.OFF
         elif dev.play_state == "playing":
@@ -104,6 +116,7 @@ class NaimMediaPlayer(MediaPlayerEntity):
             Attributes.MEDIA_IMAGE_URL: dev.media_image,
             Attributes.MEDIA_POSITION: dev.media_position,
             Attributes.MEDIA_DURATION: 0,
+            Attributes.MEDIA_TYPE: "music",
             Attributes.REPEAT: repeat,
             Attributes.SHUFFLE: dev.shuffle_mode,
         })

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uc-intg-naim"
-version = "2.1.1"
+version = "2.2.0"
 description = "Naim Audio integration for Unfolded Circle Remote Two/3"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,8 +24,8 @@ classifiers = [
     "Topic :: Multimedia"
 ]
 dependencies = [
-    "ucapi>=0.5.2dev0",
-    "ucapi-framework>=1.9.1",
+    "ucapi>=0.7.0",
+    "ucapi-framework>=1.9.5",
     "aiohttp>=3.9.0",
     "certifi",
 ]

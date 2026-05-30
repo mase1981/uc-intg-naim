@@ -116,7 +116,7 @@ class NaimRemote(RemoteEntity):
 
         all_commands = _SIMPLE_COMMANDS + fav_commands
 
-        attributes = {Attributes.STATE: States.OFF}
+        attributes = {Attributes.STATE: States.UNKNOWN}
 
         super().__init__(
             f"remote.{device_config.identifier}",
@@ -130,6 +130,9 @@ class NaimRemote(RemoteEntity):
         self.subscribe_to_device(device)
 
     async def sync_state(self) -> None:
+        if self._device.state == "UNAVAILABLE":
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
         state = States.ON if self._device.power else States.OFF
         self.update({Attributes.STATE: state})
 

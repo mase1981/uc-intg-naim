@@ -52,6 +52,10 @@ class NaimStateSensor(_BaseSensor):
 
     async def sync_state(self) -> None:
         dev = self._device
+        if dev.state == "UNAVAILABLE":
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+
         if dev.power is None or not dev.power:
             value = "Off"
         elif dev.play_state == "playing":
@@ -76,6 +80,10 @@ class NaimSourceSensor(_BaseSensor):
 
     async def sync_state(self) -> None:
         dev = self._device
+        if dev.state == "UNAVAILABLE":
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+
         source = dev.source
         display = dev.source_names.get(source, source) if source else ""
         self.update({
@@ -91,6 +99,10 @@ class NaimAudioFormatSensor(_BaseSensor):
 
     async def sync_state(self) -> None:
         dev = self._device
+        if dev.state == "UNAVAILABLE":
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+
         parts = []
         if dev.codec:
             parts.append(dev.codec)

@@ -48,6 +48,10 @@ class NaimSourceSelect(SelectEntity):
 
     async def sync_state(self) -> None:
         dev = self._device
+        if dev.state == "UNAVAILABLE":
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+
         source_names = dev.source_names or {}
         if source_names:
             self._source_to_display = {

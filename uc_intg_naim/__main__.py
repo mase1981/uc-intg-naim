@@ -1,5 +1,8 @@
 """Entry point for Naim integration."""
 
-from uc_intg_naim import run
+import asyncio
 
-run()
+from uc_intg_naim import main
+
+if __name__ == "__main__":
+    asyncio.run(main())

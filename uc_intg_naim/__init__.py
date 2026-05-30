@@ -5,45 +5,41 @@ Naim Audio integration for Unfolded Circle Remote Two/3.
 :license: MPL-2.0, see LICENSE for more details.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
 import os
 from pathlib import Path
 
-from ucapi_framework import BaseConfigManager
-
-_LOG = logging.getLogger(__name__)
-
-__version__ = "2.0.0"
-
-_DRIVER_JSON = Path(__file__).parent.parent.absolute() / "driver.json"
 try:
-    with open(_DRIVER_JSON, "r", encoding="utf-8") as _f:
-        _DRIVER_DATA = json.load(_f)
-        __version__ = _DRIVER_DATA.get("version", __version__)
-except Exception:
-    pass
+    _driver_path = Path(__file__).parent.parent / "driver.json"
+    with open(_driver_path, "r", encoding="utf-8") as f:
+        __version__ = json.load(f).get("version", "0.0.0")
+except (FileNotFoundError, json.JSONDecodeError):
+    __version__ = "0.0.0"
 
 
 async def main() -> None:
-    level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
-    logging.basicConfig(
-        level=getattr(logging, level, logging.DEBUG),
-        format="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)-25s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    from ucapi import DeviceStates
+    from ucapi_framework import get_config_path, BaseConfigManager
 
     from uc_intg_naim.config import NaimConfig
     from uc_intg_naim.driver import NaimDriver
     from uc_intg_naim.setup_flow import NaimSetupFlow
 
-    driver = NaimDriver()
+    level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
+    logging.basicConfig(
+        level=getattr(logging, level, logging.DEBUG),
+        format="%(asctime)s | %(levelname)-8s | %(name)-25s | %(message)s",
+    )
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
 
-    config_path = driver.api.config_dir_path or ""
+    _LOG = logging.getLogger(__name__)
+    _LOG.info("Starting Naim Integration v%s", __version__)
+
+    driver = NaimDriver()
+    config_path = get_config_path(driver.api.config_dir_path or "")
     config_manager = BaseConfigManager(
         config_path,
         add_handler=driver.on_device_added,
@@ -53,21 +49,17 @@ async def main() -> None:
     driver.config_manager = config_manager
 
     setup_handler = NaimSetupFlow.create_handler(driver)
-    driver_json_path = str(_DRIVER_JSON)
+    driver_path = os.path.join(os.path.dirname(__file__), "..", "driver.json")
+    await driver.api.init(os.path.abspath(driver_path), setup_handler)
+    await driver.register_all_device_instances(connect=False)
 
-    await driver.api.init(driver_json_path, setup_handler)
-
-    await driver.register_all_configured_devices(connect=False)
-
-    configs = list(config_manager.all())
-    if configs:
-        _LOG.info("Found %d configured device(s)", len(configs))
-    else:
-        _LOG.info("No configured devices - waiting for setup")
-
-    _LOG.info("Naim integration v%s started", __version__)
+    device_count = len(list(config_manager.all()))
+    await driver.api.set_device_state(
+        DeviceStates.CONNECTED if device_count > 0 else DeviceStates.DISCONNECTED
+    )
+    _LOG.info("Naim integration started - %d device(s) configured", device_count)
     await asyncio.Future()
 
 
-def run() -> None:
+if __name__ == "__main__":
     asyncio.run(main())

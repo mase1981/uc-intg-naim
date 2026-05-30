@@ -11,13 +11,13 @@ import logging
 from typing import TYPE_CHECKING
 
 from ucapi import StatusCodes
-from ucapi.api_definitions import (
+from ucapi.media_player import (
     BrowseMediaItem,
     BrowseOptions,
     BrowseResults,
     MediaClass,
-    Pagination,
 )
+from ucapi.api_definitions import Pagination
 
 if TYPE_CHECKING:
     from uc_intg_naim.config import NaimConfig

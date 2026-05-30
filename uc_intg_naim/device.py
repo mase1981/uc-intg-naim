@@ -7,40 +7,25 @@ Naim device wrapper using ucapi-framework.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
-from ucapi_framework.device import ExternalClientDevice, DeviceEvents
+from ucapi_framework import PollingDevice, DeviceEvents
 
 from uc_intg_naim.client import NaimClient
 from uc_intg_naim.config import NaimConfig
-from uc_intg_naim.const import (
-    CONNECT_RETRIES,
-    CONNECT_RETRY_DELAY,
-    MAX_POLL_FAILURES,
-    POLL_INTERVAL,
-    RECONNECT_DELAY,
-    WATCHDOG_INTERVAL,
-)
+from uc_intg_naim.const import POLL_INTERVAL
 
 _LOG = logging.getLogger(__name__)
 
 
-class NaimDevice(ExternalClientDevice):
+class NaimDevice(PollingDevice):
 
-    def __init__(self, device_config: NaimConfig, **kwargs) -> None:
-        super().__init__(
-            device_config=device_config,
-            enable_watchdog=True,
-            watchdog_interval=WATCHDOG_INTERVAL,
-            reconnect_delay=RECONNECT_DELAY,
-            max_reconnect_attempts=0,
-            **kwargs,
-        )
-        self._client = NaimClient(device_config.host, device_config.port)
-        self._poll_task: asyncio.Task | None = None
-        self._consecutive_failures: int = 0
+    def __init__(self, device_config: NaimConfig, **kwargs: Any) -> None:
+        super().__init__(device_config, poll_interval=POLL_INTERVAL, **kwargs)
+        self._device_config = device_config
+        self._client: NaimClient | None = None
+        self._state: str = "UNAVAILABLE"
         self._power: bool | None = None
         self._volume: int = 0
         self._muted: bool = False
@@ -81,8 +66,8 @@ class NaimDevice(ExternalClientDevice):
         return self._device_config
 
     @property
-    def client(self) -> NaimClient:
-        return self._client
+    def state(self) -> str:
+        return self._state
 
     @property
     def power(self) -> bool | None:
@@ -156,112 +141,77 @@ class NaimDevice(ExternalClientDevice):
     def bit_depth(self) -> str:
         return self._bit_depth
 
-    async def create_client(self) -> Any:
+    async def establish_connection(self) -> NaimClient:
         self._client = NaimClient(self._device_config.host, self._device_config.port)
+        if not await self._client.connect():
+            await self._client.disconnect()
+            self._client = None
+            raise ConnectionError(
+                f"Cannot connect to {self._device_config.host}:{self._device_config.port}"
+            )
+
+        self._sources = self._client.get_sources()
+        self._source_names = self._client.get_source_names()
+        self._favourites = self._client.get_favourite_names()
+
+        try:
+            await self._update_state()
+        except ConnectionError:
+            _LOG.warning("[%s] Initial state query failed, using defaults", self.log_id)
+
+        self._state = "ON"
+        _LOG.info("[%s] Connected, %d sources, %d favourites",
+                  self.log_id, len(self._sources), len(self._favourites))
         return self._client
 
-    async def connect_client(self) -> None:
-        last_err: Exception | None = None
-        for attempt in range(CONNECT_RETRIES):
-            try:
-                if not await self._client.connect():
-                    raise ConnectionError(f"Cannot connect to {self._device_config.host}")
+    async def poll_device(self) -> None:
+        if not self._client:
+            return
+        try:
+            await self._update_state()
+            self.push_update()
+        except Exception as err:
+            _LOG.debug("[%s] Poll error: %s", self.log_id, err)
+            if self._state != "UNAVAILABLE":
+                self._state = "UNAVAILABLE"
+                self.events.emit(DeviceEvents.DISCONNECTED, self.identifier)
 
-                self._sources = self._client.get_sources()
-                self._source_names = self._client.get_source_names()
-                self._favourites = self._client.get_favourite_names()
+    async def disconnect(self) -> None:
+        if self._client:
+            await self._client.disconnect()
+            self._client = None
+        self._state = "UNAVAILABLE"
+        await super().disconnect()
 
-                await self._poll_state()
-                self._consecutive_failures = 0
-                self._start_polling()
-                _LOG.info("[%s] Connected, %d sources, %d favourites",
-                          self.log_id, len(self._sources), len(self._favourites))
-                return
-
-            except Exception as err:
-                last_err = err
-                if attempt < CONNECT_RETRIES - 1:
-                    _LOG.warning("[%s] Connect attempt %d/%d failed: %s",
-                                 self.log_id, attempt + 1, CONNECT_RETRIES, err)
-                    await asyncio.sleep(CONNECT_RETRY_DELAY)
-
-        raise last_err  # type: ignore[misc]
-
-    async def disconnect_client(self) -> None:
-        self._stop_polling()
-        await self._client.disconnect()
-
-    def check_client_connected(self) -> bool:
-        return self._client.is_connected
-
-    def _start_polling(self) -> None:
-        if self._poll_task is None or self._poll_task.done():
-            self._poll_task = asyncio.create_task(self._poll_loop())
-
-    def _stop_polling(self) -> None:
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
-            self._poll_task = None
-
-    async def _poll_loop(self) -> None:
-        while True:
-            try:
-                await asyncio.sleep(POLL_INTERVAL)
-                await self._poll_state()
-                self._consecutive_failures = 0
-            except asyncio.CancelledError:
-                break
-            except Exception as err:
-                self._consecutive_failures += 1
-                _LOG.error("[%s] Poll error (%d/%d): %s",
-                           self.log_id, self._consecutive_failures, MAX_POLL_FAILURES, err)
-                if self._consecutive_failures >= MAX_POLL_FAILURES:
-                    _LOG.warning("[%s] Too many poll failures, triggering reconnect", self.log_id)
-                    self._client._connected = False
-                    self.events.emit(DeviceEvents.DISCONNECTED, self.identifier)
-                    break
-                await asyncio.sleep(POLL_INTERVAL)
-
-    async def _poll_state(self) -> None:
-        changed = False
-
+    async def _update_state(self) -> None:
         power = await self._client.get_power_state()
         if power is None:
             raise ConnectionError(f"Cannot reach {self._device_config.host}")
-        if power != self._power:
-            self._power = power
-            changed = True
+        self._power = power
 
         if self._power:
             vol_data = await self._client.get_volume()
             if vol_data:
-                new_vol = int(vol_data.get("volume", 0))
-                new_muted = vol_data.get("mute", "0") == "1"
-                if new_vol != self._volume or new_muted != self._muted:
-                    self._volume = new_vol
-                    self._muted = new_muted
-                    changed = True
+                self._volume = int(vol_data.get("volume", 0))
+                self._muted = vol_data.get("mute", "0") == "1"
 
             status = await self._client.get_status()
             if status:
                 parsed = self._client.parse_status(status)
-                if self._update_from_parsed(parsed):
-                    changed = True
+                self._update_from_parsed(parsed)
+
+            state_map = {"playing": "PLAYING", "paused": "PAUSED", "buffering": "BUFFERING"}
+            self._state = state_map.get(self._play_state, "ON")
         else:
-            if self._play_state != "stopped":
-                self._play_state = "stopped"
-                self._media_title = ""
-                self._media_artist = ""
-                self._media_album = ""
-                self._media_image = ""
-                self._media_position = 0
-                changed = True
+            self._state = "OFF"
+            self._play_state = "stopped"
+            self._media_title = ""
+            self._media_artist = ""
+            self._media_album = ""
+            self._media_image = ""
+            self._media_position = 0
 
-        if changed:
-            self.push_update()
-
-    def _update_from_parsed(self, parsed: dict[str, Any]) -> bool:
-        changed = False
+    def _update_from_parsed(self, parsed: dict[str, Any]) -> None:
         for attr, key in [
             ("_play_state", "state"),
             ("_source", "source"),
@@ -276,22 +226,17 @@ class NaimDevice(ExternalClientDevice):
             ("_bit_depth", "bit_depth"),
         ]:
             new_val = parsed.get(key)
-            if new_val is not None and getattr(self, attr) != new_val:
+            if new_val is not None:
                 setattr(self, attr, new_val)
-                changed = True
 
-        new_pos = parsed.get("position", 0) // 1000
-        if new_pos != self._media_position:
-            self._media_position = new_pos
-            changed = True
-
-        return changed
+        self._media_position = parsed.get("position", 0) // 1000
 
     # --- Commands ---
 
     async def turn_on(self) -> bool:
         if await self._client.power_on():
             self._power = True
+            self._state = "ON"
             self.push_update()
             return True
         return False
@@ -299,6 +244,7 @@ class NaimDevice(ExternalClientDevice):
     async def turn_off(self) -> bool:
         if await self._client.power_off():
             self._power = False
+            self._state = "OFF"
             self.push_update()
             return True
         return False
