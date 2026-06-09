@@ -36,6 +36,7 @@ class NaimDevice(PollingDevice):
         self._media_album: str = ""
         self._media_image: str = ""
         self._media_position: int = 0
+        self._media_duration: int = 0
         self._repeat: str = "0"
         self._shuffle: bool = False
         self._codec: str = ""
@@ -120,6 +121,10 @@ class NaimDevice(PollingDevice):
     @property
     def media_position(self) -> int:
         return self._media_position
+
+    @property
+    def media_duration(self) -> int:
+        return self._media_duration
 
     @property
     def repeat_mode(self) -> str:
@@ -210,6 +215,7 @@ class NaimDevice(PollingDevice):
             self._media_album = ""
             self._media_image = ""
             self._media_position = 0
+            self._media_duration = 0
 
     def _update_from_parsed(self, parsed: dict[str, Any]) -> None:
         for attr, key in [
@@ -230,6 +236,7 @@ class NaimDevice(PollingDevice):
                 setattr(self, attr, new_val)
 
         self._media_position = parsed.get("position", 0) // 1000
+        self._media_duration = parsed.get("duration", 0) // 1000
 
     # --- Commands ---
 
