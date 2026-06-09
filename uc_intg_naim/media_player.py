@@ -115,7 +115,7 @@ class NaimMediaPlayer(MediaPlayerEntity):
             Attributes.MEDIA_ALBUM: dev.media_album,
             Attributes.MEDIA_IMAGE_URL: dev.media_image,
             Attributes.MEDIA_POSITION: dev.media_position,
-            Attributes.MEDIA_DURATION: 0,
+            Attributes.MEDIA_DURATION: dev.media_duration,
             Attributes.MEDIA_TYPE: "music",
             Attributes.REPEAT: repeat,
             Attributes.SHUFFLE: dev.shuffle_mode,
