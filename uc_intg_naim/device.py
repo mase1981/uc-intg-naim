@@ -304,6 +304,18 @@ class NaimDevice(PollingDevice):
     async def cmd_play_favourite(self, fav_id: str) -> bool:
         return await self._client.play_favourite(fav_id)
 
+    async def browse_ussi(
+        self, ussi: str, offset: int = 0, limit: int = 50
+    ) -> dict[str, Any] | None:
+        if not self._client:
+            return None
+        return await self._client.browse(ussi, offset, limit)
+
+    async def cmd_play_ussi(self, ussi: str) -> bool:
+        if not self._client:
+            return False
+        return await self._client.play_ussi(ussi)
+
     async def cmd_repeat(self, mode: str) -> bool:
         return await self._client.set_repeat(mode)
 

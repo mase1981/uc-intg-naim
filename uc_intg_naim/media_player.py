@@ -19,6 +19,7 @@ from ucapi_framework import MediaPlayerEntity
 
 from uc_intg_naim import browser
 from uc_intg_naim.config import NaimConfig
+from uc_intg_naim.const import UNSELECTABLE_SOURCES
 from uc_intg_naim.device import NaimDevice
 
 _LOG = logging.getLogger(__name__)
@@ -98,7 +99,10 @@ class NaimMediaPlayer(MediaPlayerEntity):
         elif dev.repeat_mode == "2":
             repeat = RepeatMode.ALL
 
-        source_list = list(self._device_config.sources) if self._device_config.sources else []
+        source_list = [
+            src for src in (self._device_config.sources or [])
+            if src not in UNSELECTABLE_SOURCES
+        ]
         for fav in self._device_config.favourites:
             fname = fav.get("name", "")
             if fname:
@@ -183,6 +187,8 @@ class NaimMediaPlayer(MediaPlayerEntity):
                 media_id = params.get("media_id", "")
                 if media_type == "favourite" and media_id:
                     await dev.cmd_play_favourite(media_id)
+                elif media_type in ("play_ussi", "node") and media_id:
+                    await dev.cmd_play_ussi(media_id)
                 elif media_type == "source" and media_id:
                     await dev.cmd_select_source(media_id)
             elif cmd_id == Commands.REPEAT:

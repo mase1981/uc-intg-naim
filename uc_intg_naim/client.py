@@ -243,6 +243,21 @@ class NaimClient:
                 names[sid] = inp.get("name", sid)
         return names if names else dict(DEFAULT_SOURCE_NAMES)
 
+    # --- Browse ---
+
+    async def browse(
+        self, ussi: str, offset: int = 0, limit: int = 50
+    ) -> dict[str, Any] | None:
+        ussi = ussi.strip("/")
+        data = await self._get(f"/{ussi}?offset={offset}&limit={limit}")
+        if data and isinstance(data, dict) and "raw_response" not in data:
+            return data
+        return None
+
+    async def play_ussi(self, ussi: str) -> bool:
+        ussi = ussi.strip("/")
+        return await self._get(f"/{ussi}?cmd=play") is not None
+
     # --- Favourites ---
 
     async def play_favourite(self, favourite_id: str) -> bool:

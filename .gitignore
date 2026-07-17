@@ -44,6 +44,10 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Testing / simulator files (keep local only, never push to repository)
+tests/
+simulator/
+
 # Virtual environments
 .env
 .venv

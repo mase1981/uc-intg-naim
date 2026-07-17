@@ -60,3 +60,16 @@ DEFAULT_SOURCE_NAMES = {
     "files": "Local Files",
     "multiroom": "Multi-room",
 }
+
+# Sources the streamer rejects for ?cmd=select (HTTP 400). Mirrors the Naim/Focal
+# app's LeoInput.UNSELECTABLE set: browse/streaming sources are activated by playing
+# an item, not by selecting the input, so they must not appear as selectable sources.
+UNSELECTABLE_SOURCES = frozenset({
+    "spotify", "tidal", "qobuz", "upnp", "usb", "files",
+    "mymusic", "playqueue", "gcast", "googlecast",
+})
+
+# Streaming/browse sources that expose a navigable content tree via GET /inputs/{id}.
+BROWSABLE_SOURCES = frozenset({
+    "upnp", "usb", "tidal", "qobuz", "files", "mymusic",
+})
