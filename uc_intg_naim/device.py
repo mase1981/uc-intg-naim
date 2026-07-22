@@ -279,10 +279,20 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_volume_up(self) -> bool:
-        return await self._client.volume_up()
+        new_vol = min(100, self._volume + 1)
+        if await self._client.set_volume(new_vol):
+            self._volume = new_vol
+            self.push_update()
+            return True
+        return False
 
     async def cmd_volume_down(self) -> bool:
-        return await self._client.volume_down()
+        new_vol = max(0, self._volume - 1)
+        if await self._client.set_volume(new_vol):
+            self._volume = new_vol
+            self.push_update()
+            return True
+        return False
 
     async def cmd_mute(self) -> bool:
         if await self._client.mute():
