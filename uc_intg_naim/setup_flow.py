@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ucapi import RequestUserInput, SetupAction
+from ucapi import IntegrationSetupError, RequestUserInput, SetupAction, SetupError
 from ucapi_framework import BaseSetupFlow
 
 from uc_intg_naim.client import NaimClient
@@ -29,17 +29,19 @@ class NaimSetupFlow(BaseSetupFlow[NaimConfig]):
         if self._pre_discovery_data:
             host = self._pre_discovery_data.get("host")
 
+            # Re-shown forms must move the flow to MANUAL_ENTRY, otherwise the
+            # framework has no handler for the next submission and setup aborts.
             if not host:
-                return self.get_manual_entry_form()
+                return await self._handle_manual_entry()
 
             try:
                 result = await self.query_device(self._pre_discovery_data)
                 if hasattr(result, "identifier"):
                     return await self._finalize_device_setup(result, self._pre_discovery_data)
-                return result
+                return await self._handle_manual_entry()
             except Exception as err:
                 _LOG.error("Discovery failed: %s", err)
-                return self.get_manual_entry_form()
+                return SetupError(error_type=IntegrationSetupError.CONNECTION_REFUSED)
 
         return await self._handle_manual_entry()
 
