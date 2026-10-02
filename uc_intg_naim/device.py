@@ -7,6 +7,7 @@ Naim device wrapper using ucapi-framework.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -25,6 +26,7 @@ class NaimDevice(PollingDevice):
         super().__init__(device_config, poll_interval=POLL_INTERVAL, **kwargs)
         self._device_config = device_config
         self._client: NaimClient | None = None
+        self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._state: str = "UNAVAILABLE"
         self._power: bool | None = None
         self._volume: int = 0
@@ -147,32 +149,59 @@ class NaimDevice(PollingDevice):
         return self._bit_depth
 
     async def establish_connection(self) -> NaimClient:
-        self._client = NaimClient(self._device_config.host, self._device_config.port)
-        if not await self._client.connect():
-            await self._client.disconnect()
-            self._client = None
-            raise ConnectionError(
-                f"Cannot connect to {self._device_config.host}:{self._device_config.port}"
+        # Never raise when the streamer is unreachable: a failed connect() is not
+        # retried by the framework (e.g. Remote waking from standby before its
+        # Wi-Fi is up), which left entities offline until a Remote reboot.
+        # The poll loop keeps running and reconnects once the device is back.
+        if not await self._reconnect():
+            _LOG.warning(
+                "[%s] Device unreachable, will keep retrying in the background",
+                self.log_id,
             )
-
-        self._sources = self._client.get_sources()
-        self._source_names = self._client.get_source_names()
-        self._favourites = self._client.get_favourite_names()
+            self._state = "UNAVAILABLE"
+            self.push_update()
+            return self._client
 
         try:
             await self._update_state()
         except ConnectionError:
             _LOG.warning("[%s] Initial state query failed, using defaults", self.log_id)
+            self._state = "ON"
 
-        self._state = "ON"
         _LOG.info("[%s] Connected, %d sources, %d favourites",
                   self.log_id, len(self._sources), len(self._favourites))
         return self._client
 
+    async def _reconnect(self) -> bool:
+        async with self._connect_lock:
+            if self._client is None:
+                self._client = NaimClient(self._device_config.host, self._device_config.port)
+            if self._client.is_connected:
+                return True
+            try:
+                if not await self._client.connect():
+                    return False
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                _LOG.debug("[%s] Reconnect failed: %s", self.log_id, err)
+                return False
+
+            self._sources = self._client.get_sources()
+            self._source_names = self._client.get_source_names()
+            self._favourites = self._client.get_favourite_names()
+            return True
+
+    async def _ensure_connected(self) -> bool:
+        if self._client is not None and self._client.is_connected:
+            return True
+        if await self._reconnect():
+            return True
+        _LOG.warning("[%s] Device unreachable, command not sent", self.log_id)
+        return False
+
     async def poll_device(self) -> None:
-        if not self._client:
-            return
         try:
+            if not await self._reconnect():
+                raise ConnectionError(f"Cannot reach {self._device_config.host}")
             await self._update_state()
             self.push_update()
         except Exception as err:
@@ -182,11 +211,13 @@ class NaimDevice(PollingDevice):
                 self.events.emit(DeviceEvents.DISCONNECTED, self.identifier)
 
     async def disconnect(self) -> None:
-        if self._client:
-            await self._client.disconnect()
-            self._client = None
         self._state = "UNAVAILABLE"
+        # Stop the poll task first so it cannot reopen the client while closing.
         await super().disconnect()
+        async with self._connect_lock:
+            if self._client:
+                await self._client.disconnect()
+                self._client = None
 
     async def _update_state(self) -> None:
         power = await self._client.get_power_state()
@@ -241,6 +272,8 @@ class NaimDevice(PollingDevice):
     # --- Commands ---
 
     async def turn_on(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         if await self._client.power_on():
             self._power = True
             self._state = "ON"
@@ -249,6 +282,8 @@ class NaimDevice(PollingDevice):
         return False
 
     async def turn_off(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         if await self._client.power_off():
             self._power = False
             self._state = "OFF"
@@ -257,21 +292,33 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_play(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.play()
 
     async def cmd_pause(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.pause()
 
     async def cmd_stop(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.stop()
 
     async def cmd_next(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.next_track()
 
     async def cmd_previous(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.previous_track()
 
     async def cmd_volume(self, volume: int) -> bool:
+        if not await self._ensure_connected():
+            return False
         if await self._client.set_volume(volume):
             self._volume = volume
             self.push_update()
@@ -279,6 +326,8 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_volume_up(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         new_vol = min(100, self._volume + 1)
         if await self._client.set_volume(new_vol):
             self._volume = new_vol
@@ -287,6 +336,8 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_volume_down(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         new_vol = max(0, self._volume - 1)
         if await self._client.set_volume(new_vol):
             self._volume = new_vol
@@ -295,6 +346,8 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_mute(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         if await self._client.mute():
             self._muted = True
             self.push_update()
@@ -302,6 +355,8 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_unmute(self) -> bool:
+        if not await self._ensure_connected():
+            return False
         if await self._client.unmute():
             self._muted = False
             self.push_update()
@@ -309,25 +364,33 @@ class NaimDevice(PollingDevice):
         return False
 
     async def cmd_select_source(self, source: str) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.set_source(source)
 
     async def cmd_play_favourite(self, fav_id: str) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.play_favourite(fav_id)
 
     async def browse_ussi(
         self, ussi: str, offset: int = 0, limit: int = 50
     ) -> dict[str, Any] | None:
-        if not self._client:
+        if not await self._ensure_connected():
             return None
         return await self._client.browse(ussi, offset, limit)
 
     async def cmd_play_ussi(self, ussi: str) -> bool:
-        if not self._client:
+        if not await self._ensure_connected():
             return False
         return await self._client.play_ussi(ussi)
 
     async def cmd_repeat(self, mode: str) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.set_repeat(mode)
 
     async def cmd_shuffle(self, enabled: bool) -> bool:
+        if not await self._ensure_connected():
+            return False
         return await self._client.set_shuffle(enabled)
